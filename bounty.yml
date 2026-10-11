@@ -1,30 +1,31 @@
-# Rules for one bounty pool. The LLM only produces evidence-backed scores;
-# turning scores into money is plain code using the values below.
+# Rules for one bounty pool. JEV only answers narrow questions and the sandbox
+# only reports pass/fail; turning those into money is plain code using the
+# numbers below.
 
-budget:
-  cash_usd: 2000
-  credits:
-    aws_usd: 1000
-period: monthly
+budget:              # first currency is the primary one (min payout applies to it)
+  USD: 2000
+  AWS credits: 1000
 
 eligible:
-  labels: [bounty]
-  include_reviews: true
-  include_docs: true
+  issue_labels: [bounty]   # code PRs must fix an issue with one of these labels
+  include_docs: true       # docs-only PRs can earn docs points without an issue
 
-weights:
-  difficulty: 0.5
-  impact: 0.3
-  review_quality: 0.2
+scoring:
+  # code PR points = (base + difficulty) x impact
+  # Adjacent levels stay close (v1 used 3x gaps, which turned JEV's trivial-vs-small
+  # uncertainty into 3x payout differences for near-identical one-line fixes).
+  base: 20
+  difficulty: [0, 10, 25, 50]     # trivial, small, moderate, hard
+  impact: [0.5, 1.0, 1.5, 2.0]    # cosmetic, minor, moderate, severe
+  docs: [0, 5, 15]                # no real change, small correction, substantial
 
 caps:
-  per_contributor_pct: 30
-  min_payout_usd: 10
+  per_contributor_pct: 30   # nobody gets more than this share; the excess rolls over
+  min_payout: 10            # in the primary currency; smaller shares are dropped
+
+anti_gaming:
+  duplicate_similarity: 0.8   # changed-line overlap that marks a PR as a copy
 
 exclude:
   bots: true
-  authors_file: .github/employees.txt
-
-verification:
-  require_fail_to_pass: true
-  flaky_reruns: 2
+  authors: []               # e.g. employees of the sponsoring company

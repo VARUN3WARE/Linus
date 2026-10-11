@@ -29,8 +29,8 @@ class Generator:
         self.prompt_tokens = 0
         self.completion_tokens = 0
 
-    def complete(self, system: str, user: str) -> Generation:
-        kwargs = {}
+    def complete(self, system: str, user: str, json_mode: bool = True) -> Generation:
+        kwargs: dict = {"response_format": {"type": "json_object"}} if json_mode else {}
         if self.reasoning and self.model.startswith(("gpt-5", "gpt-6", "o")):
             kwargs["reasoning_effort"] = self.reasoning
         response = self._client.chat.completions.create(

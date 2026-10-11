@@ -1,8 +1,15 @@
 """Command-line entry point."""
 
+import atexit
+import getpass
+import hashlib
+import json
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
+from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 import typer
@@ -11,13 +18,23 @@ from rich.console import Console
 from rich.table import Table
 from typesafe_sdk import Noul
 
+from linus import demo as demo_mod
+from linus import evals, ledger, report
+from linus.close import Close
 from linus.config import Settings, load_settings
 from linus.jev import Jev
 from linus.llm import Generator
+from linus.policy import load as load_policy
+from linus.source import LocalSource
+from linus.store import Store
 from linus.tracing import init_tracing, shutdown_tracing
 
 app = typer.Typer(no_args_is_help=True, help="Linus: pays only for proven open-source work.")
-console = Console()
+# LINUS_RECORD=out.svg saves the session as a terminal screenshot.
+_RECORD = os.getenv("LINUS_RECORD")
+console = Console(record=bool(_RECORD), width=118 if _RECORD else None)
+if _RECORD:
+    atexit.register(lambda: console.save_svg(_RECORD, title="linus"))
 
 
 @app.callback()
@@ -53,7 +70,7 @@ def _ping_jev(settings: Settings) -> str:
 
 def _ping_openai(settings: Settings) -> str:
     gen = Generator(settings)
-    out = gen.complete("Reply with one word.", "Say OK.")
+    out = gen.complete("Reply with one word.", "Say OK.", json_mode=False)
     return f"{out.model} replied {out.text.strip()[:20]!r}, {out.prompt_tokens + out.completion_tokens} tokens"
 
 
@@ -121,3 +138,153 @@ def doctor() -> None:
     if tracing:
         console.print("Sent a [bold]doctor[/] trace to neatlogs. Check it shows up in the dashboard.")
     raise typer.Exit(1 if checks.failed else 0)
+
+
+def _demo_root(settings: Settings) -> Path:
+    return settings.state_dir / "demo"
+
+
+def _source(settings: Settings) -> LocalSource:
+    root = _demo_root(settings)
+    if not (root / "fixture.json").exists():
+        console.print("[yellow]No demo month yet, building it.[/]")
+        demo_mod.build(root, force=True)
+    return LocalSource(root)
+
+
+def _run_close(settings: Settings, run_id: str | None, crash_after: int | None,
+               reuse_oracles: bool = True) -> dict:
+    problems = settings.problems()
+    if problems:
+        console.print("[red]Fix .env first:[/] " + "; ".join(problems))
+        raise typer.Exit(1)
+    init_tracing(settings)
+    try:
+        close_run = Close(settings, _source(settings), load_policy(Path("bounty.yml")),
+                          report.ConsoleUI(console), run_id=run_id, crash_after=crash_after,
+                          reuse_oracles=reuse_oracles)
+        summary = close_run.run()
+    finally:
+        shutdown_tracing()
+    Path(summary["run_dir"], "report.md").write_text(report.markdown(summary))
+    return summary
+
+
+@app.command()
+def demo(force: bool = typer.Option(True, help="Rebuild if it already exists.")) -> None:
+    """Build the demo bounty month: a library, 5 issues, 11 PRs (6 of them attacks)."""
+    settings = load_settings()
+    root = demo_mod.build(_demo_root(settings), force=force)
+    fixture = json.loads((root / "fixture.json").read_text())
+    table = Table("PR", "author", "title", title=f"{fixture['repo']} · {fixture['period']}")
+    for pr in fixture["pulls"]:
+        table.add_row(f"#{pr['number']}", pr["author"], pr["title"])
+    console.print(table)
+    console.print(f"{len(fixture['issues'])} bounty issues, {len(fixture['pulls'])} PRs. "
+                  "CI is green on every PR. Run [bold]linus close[/].")
+
+
+@app.command()
+def close(
+    resume: str = typer.Option(None, help="Run id to resume; 'latest' picks the last unfinished run."),
+    crash_after: int = typer.Option(None, hidden=True, help="Fault injection: hard-exit after N PRs."),
+) -> None:
+    """Run the month-end close and propose a ledger."""
+    settings = load_settings()
+    run_id = resume
+    if resume == "latest":
+        source = _source(settings)
+        run_id = Store(settings.state_dir / "linus.db").latest_unfinished(source.name, source.period)
+        if not run_id:
+            console.print("Nothing to resume.")
+            raise typer.Exit(0)
+    summary = _run_close(settings, run_id, crash_after)
+    raise typer.Exit(0 if summary["status"] == "proposed" else 1)
+
+
+@app.command()
+def approve(run_id: str, by: str = typer.Option(None, help="Approver name (defaults to your user).")) -> None:
+    """Approve a proposed run: append its payouts to the hash-chained ledger."""
+    settings = load_settings()
+    store = Store(settings.state_dir / "linus.db")
+    run = store.run(run_id)
+    if not run or run["status"] != "proposed":
+        console.print(f"[red]Run {run_id} is not awaiting approval[/] (status: {run and run['status']}).")
+        raise typer.Exit(1)
+    proposal = settings.state_dir / "runs" / run_id / "ledger.proposed.jsonl"
+    entries = [json.loads(line) for line in proposal.read_text().splitlines() if line.strip()]
+    path = settings.state_dir / "ledger.jsonl"
+    if problems := ledger.verify_chain(path):
+        console.print("[red]Ledger is corrupted, refusing to append:[/] " + "; ".join(problems))
+        raise typer.Exit(1)
+    already = ledger.paid_prs(path, run["repo"])
+    if dupes := {n for e in entries if e["type"] == "payout" for n in e["prs"]} & already:
+        console.print(f"[red]Refusing: PRs {sorted(dupes)} were already paid.[/]")
+        raise typer.Exit(1)
+    approval = {"type": "approval", "run_id": run_id, "approved_by": by or getpass.getuser(),
+                "approved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "proposal_sha256": hashlib.sha256(proposal.read_bytes()).hexdigest()}
+    written = ledger.append(path, entries + [approval])
+    store.finish_run(run_id, "approved", json.loads(run["summary"]))
+    console.print(f"[green]Approved.[/] {len(written)} entries appended to {path} "
+                  f"(head {written[-1]['hash'][:12]}).")
+
+
+@app.command("ledger")
+def ledger_cmd() -> None:
+    """Verify the hash chain and show the ledger."""
+    settings = load_settings()
+    path = settings.state_dir / "ledger.jsonl"
+    entries = ledger.read(path)
+    table = Table("#", "type", "who", "amount", "PRs", "hash", title=str(path))
+    for e in entries:
+        amount = f"{e['amount']:,.2f} {e['currency']}" if "amount" in e else ""
+        who = e.get("contributor") or e.get("approved_by") or ""
+        table.add_row(str(e["seq"]), e["type"], who, amount, " ".join(f"#{n}" for n in e.get("prs", [])),
+                      e["hash"][:12])
+    console.print(table)
+    problems = ledger.verify_chain(path)
+    if problems:
+        console.print("[bold red]Chain broken:[/]")
+        for p in problems:
+            console.print(f"  - {p}")
+        raise typer.Exit(1)
+    console.print(f"[green]Chain intact[/]: {len(entries)} entries, every hash verified.")
+
+
+@app.command("eval")
+def eval_cmd(
+    label: str = typer.Option("", help="Name for this run on the scorecard, e.g. v1."),
+    run: str = typer.Option(None, help="Score an existing finished run instead of starting a fresh one."),
+) -> None:
+    """Run a fresh close on the demo month and score it against ground truth."""
+    settings = load_settings()
+    if run:
+        stored = Store(settings.state_dir / "linus.db").run(run)
+        if not stored or stored["status"] == "running":
+            console.print(f"[red]Run {run} is not finished.[/]")
+            raise typer.Exit(1)
+        summary = json.loads(stored["summary"])
+    else:
+        summary = _run_close(settings, None, None, reuse_oracles=False)
+    expected = json.loads((_demo_root(settings) / "expected.json").read_text())
+    result = evals.score(summary, expected)
+    path = evals.save(result, label, Path("evals"))
+    table = Table("PR", "author", "expected", "got", "", title="Eval vs ground truth")
+    for row in result["rows"]:
+        mark = "[green]ok[/]" if row["ok"] else "[red]MISS[/]"
+        table.add_row(f"#{row['pr']}", row["author"], row["expected"], row["got"], mark)
+    console.print(table)
+    console.print(f"accuracy {result['accuracy']:.0%} · false-pay {result['false_pay_rate']:.0%} · "
+                  f"missed-good {result['missed_good_rate']:.0%} · human-flag {result['human_flag_rate']:.0%}")
+    console.print(f"saved {path} and evals/SCORECARD.md")
+
+
+@app.command()
+def runs() -> None:
+    """List past runs."""
+    settings = load_settings()
+    table = Table("run", "repo", "period", "status", "created")
+    for r in Store(settings.state_dir / "linus.db").runs():
+        table.add_row(r["id"], r["repo"], r["period"], r["status"], r["created_at"])
+    console.print(table)
