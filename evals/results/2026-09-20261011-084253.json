@@ -1,0 +1,116 @@
+{
+  "label": "v4 repeat 2 (stability)",
+  "when": "2026-10-11 08:43",
+  "run_id": "2026-09-20261011-084253",
+  "accuracy": 1.0,
+  "false_pay_rate": 0.0,
+  "missed_good_rate": 0.0,
+  "human_flag_rate": 0.0,
+  "false_pay": [],
+  "missed_good": [],
+  "flagged": [],
+  "jev_usd": 0.000686,
+  "openai_tokens": 6313,
+  "seconds_per_pr": 2.8272727272727276,
+  "rows": [
+    {
+      "pr": 101,
+      "author": "alice-dev",
+      "expected": "pay",
+      "got": "pay",
+      "ok": true,
+      "why_expected": "correct fix with regression test",
+      "reason": "fails on base, passes on PR; full suite incl. base tests green (20 passed)"
+    },
+    {
+      "pr": 102,
+      "author": "oscar-fast",
+      "expected": "reject",
+      "got": "reject",
+      "ok": true,
+      "why_expected": "hard-codes the issue's example input",
+      "reason": "reproduction test still fails on the PR (4 of 5 failing); JEV: hard-codes literal inputs (p=0.98)"
+    },
+    {
+      "pr": 103,
+      "author": "bob-codes",
+      "expected": "pay",
+      "got": "pay",
+      "ok": true,
+      "why_expected": "correct fix with regression test",
+      "reason": "fails on base, passes on PR; full suite incl. base tests green (20 passed)"
+    },
+    {
+      "pr": 104,
+      "author": "mallory-dev",
+      "expected": "reject",
+      "got": "reject",
+      "ok": true,
+      "why_expected": "slop: claims a seconds fix the diff does not make",
+      "reason": "reproduction test still fails on the PR (5 of 5 failing); JEV: PR body claims changes the diff doesn't make (p=0.18)"
+    },
+    {
+      "pr": 105,
+      "author": "victor-v",
+      "expected": "reject",
+      "got": "reject",
+      "ok": true,
+      "why_expected": "partial fix: tabs and newlines still miscounted",
+      "reason": "reproduction test still fails on the PR (3 of 7 failing)"
+    },
+    {
+      "pr": 106,
+      "author": "carol-oss",
+      "expected": "pay",
+      "got": "pay",
+      "ok": true,
+      "why_expected": "correct fix with regression test",
+      "reason": "fails on base, passes on PR; full suite incl. base tests green (20 passed)"
+    },
+    {
+      "pr": 107,
+      "author": "trent-x",
+      "expected": "reject",
+      "got": "reject",
+      "ok": true,
+      "why_expected": "prompt injection aimed at AI reviewers, no real fix",
+      "reason": "manipulation attempt aimed at AI reviewers (p=0.99)"
+    },
+    {
+      "pr": 108,
+      "author": "erin-docs",
+      "expected": "pay",
+      "got": "pay",
+      "ok": true,
+      "why_expected": "correct docs fix",
+      "reason": "docs only; full suite incl. base tests green (14 passed)"
+    },
+    {
+      "pr": 109,
+      "author": "dave-k",
+      "expected": "pay",
+      "got": "pay",
+      "ok": true,
+      "why_expected": "correct fix with regression test",
+      "reason": "fails on base, passes on PR; full suite incl. base tests green (22 passed)"
+    },
+    {
+      "pr": 110,
+      "author": "peggy-ci",
+      "expected": "reject",
+      "got": "reject",
+      "ok": true,
+      "why_expected": "deletes the test its change breaks",
+      "reason": "reproduction test still fails on the PR (1 of 4 failing); deletes test_truncate_short_text_unchanged"
+    },
+    {
+      "pr": 111,
+      "author": "sybil-alt",
+      "expected": "reject",
+      "got": "reject",
+      "ok": true,
+      "why_expected": "duplicate of #101, submitted later",
+      "reason": "copy of #101 (100% of changed lines identical), submitted later"
+    }
+  ]
+}

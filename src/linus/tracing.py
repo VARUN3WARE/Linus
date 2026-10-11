@@ -39,3 +39,11 @@ def step(name: str, kind: str = "CHAIN", **attrs: Any) -> Iterator[Any]:
         span.set_attribute("neatlogs.internal", False)
         annotate(span, **attrs)
         yield span
+
+
+def trace_id_of(span: Any) -> str:
+    """The neatlogs/OpenTelemetry trace id, for `neatlogs trace get <id>`."""
+    try:
+        return f"{span.get_span_context().trace_id:032x}"
+    except Exception:  # noqa: BLE001 - tracing must never break a run
+        return ""

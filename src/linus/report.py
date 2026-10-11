@@ -60,9 +60,10 @@ class ConsoleUI:
         cost = summary["cost"]
         self.c.print(f"  verdicts: [green]{counts['pay']} pay[/] · [red]{counts['reject']} reject[/] · "
                      f"[yellow]{counts['flag']} flag[/]")
+        openai_usd = f"${cost['openai_usd']:.4f}" if cost.get("openai_usd") is not None else "price unknown"
         self.c.print(f"  cost: JEV {cost['jev_tokens']:,} tokens (${cost['jev_usd']:.5f}) · "
-                     f"OpenAI {cost['openai_tokens']:,} tokens ({cost['openai_model']}) · "
-                     f"{cost['pr_seconds']:.0f}s of agent time")
+                     f"OpenAI {cost['openai_tokens']:,} tokens ({cost['openai_model']}, {openai_usd}) · "
+                     f"[bold]${cost.get('usd_per_pr', 0):.4f} per PR[/] · {cost['pr_seconds']:.0f}s of agent time")
         if summary["problems"]:
             self.c.print("[bold red]  invariants failed, nothing will be paid:[/]")
             for p in summary["problems"]:
@@ -71,6 +72,8 @@ class ConsoleUI:
             self.c.print("  invariants: [green]all hold[/] (sum = budget, caps, minimums, "
                          "verified receipts, no double pay)")
         self.c.print(f"  report: {summary['run_dir']}/report.md")
+        if summary.get("trace_id"):
+            self.c.print(f"  neatlogs trace: {summary['trace_id']}  (neatlogs trace get {summary['trace_id']})")
         if summary["status"] == "proposed":
             self.c.print(f"  next: review, then [bold]linus approve {summary['run_id']}[/]")
 
@@ -80,7 +83,8 @@ def markdown(summary: dict) -> str:
     lines = [
         f"# Linus close: {summary['repo']} · {summary['period']}",
         "",
-        f"Run `{summary['run_id']}` · status **{summary['status']}**",
+        f"Run `{summary['run_id']}` · status **{summary['status']}**"
+        + (f" · neatlogs trace `{summary['trace_id']}`" if summary.get("trace_id") else ""),
         "",
         "## Payouts",
         "",
@@ -142,7 +146,9 @@ def markdown(summary: dict) -> str:
     lines += [
         "## Cost", "",
         f"- JEV: {cost['jev_tokens']:,} input tokens, ${cost['jev_usd']:.5f}",
-        f"- OpenAI ({cost['openai_model']}): {cost['openai_tokens']:,} tokens",
+        f"- OpenAI ({cost['openai_model']}): {cost['openai_tokens']:,} tokens"
+        + (f", ${cost['openai_usd']:.4f}" if cost.get("openai_usd") is not None else ""),
+        f"- Model cost per PR: ${cost.get('usd_per_pr', 0):.4f}",
         f"- Agent time: {cost['pr_seconds']:.0f}s across {cost['prs']} PRs",
         "",
         "## Invariants", "",

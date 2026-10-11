@@ -32,9 +32,11 @@ from linus.tracing import init_tracing, shutdown_tracing
 app = typer.Typer(no_args_is_help=True, help="Linus: pays only for proven open-source work.")
 # LINUS_RECORD=out.svg saves the session as a terminal screenshot.
 _RECORD = os.getenv("LINUS_RECORD")
-console = Console(record=bool(_RECORD), width=118 if _RECORD else None)
+console = Console(record=bool(_RECORD), width=132 if _RECORD else None)
 if _RECORD:
-    atexit.register(lambda: console.save_svg(_RECORD, title="linus"))
+    from rich.terminal_theme import MONOKAI
+
+    atexit.register(lambda: console.save_svg(_RECORD, title="linus", theme=MONOKAI))
 
 
 @app.callback()
@@ -158,14 +160,18 @@ def _run_close(settings: Settings, run_id: str | None, crash_after: int | None,
     if problems:
         console.print("[red]Fix .env first:[/] " + "; ".join(problems))
         raise typer.Exit(1)
-    init_tracing(settings)
+    if settings.neatlogs_api_key:
+        init_tracing(settings)
+    else:
+        console.print("[yellow]NEATLOGS_API_KEY not set: running without tracing.[/]")
     try:
         close_run = Close(settings, _source(settings), load_policy(Path("bounty.yml")),
                           report.ConsoleUI(console), run_id=run_id, crash_after=crash_after,
                           reuse_oracles=reuse_oracles)
         summary = close_run.run()
     finally:
-        shutdown_tracing()
+        if settings.neatlogs_api_key:
+            shutdown_tracing()
     Path(summary["run_dir"], "report.md").write_text(report.markdown(summary))
     return summary
 
@@ -288,3 +294,73 @@ def runs() -> None:
     for r in Store(settings.state_dir / "linus.db").runs():
         table.add_row(r["id"], r["repo"], r["period"], r["status"], r["created_at"])
     console.print(table)
+
+
+@app.command()
+def receipt(path: Path) -> None:
+    """Re-run a receipt's sandbox proof with no LLM calls and compare the outcomes."""
+    import hashlib as _hashlib
+    import shutil as _shutil
+    import tempfile
+
+    from linus import sandbox
+    from linus.diffcheck import DiffSignals
+    from linus.oracle import Oracle
+    from linus.verify import verify
+
+    settings = load_settings()
+    r = json.loads(path.read_text())
+    source = _source(settings)
+    number = r["pr"]["number"]
+    pr = next((p for p in source.pulls() if p.number == number), None)
+    if r["repo"] != source.name or pr is None:
+        console.print(f"[red]Receipt is for {r['repo']} #{number}, which this checkout doesn't have.[/]")
+        raise typer.Exit(1)
+    if (pr.base_sha, pr.head_sha) != (r["pr"]["base_sha"], r["pr"]["head_sha"]):
+        console.print("[red]The PR's commits changed since this receipt was written.[/]")
+        raise typer.Exit(1)
+    recorded = {run["label"]: run for run in (r.get("verification") or {}).get("runs", [])}
+    console.print(f"Receipt #{number} ({r['pr']['author']}): [bold]{r['verdict']}[/], {r['reason']}")
+    if not recorded:
+        console.print("Decided by the cheap gates before the sandbox; the JEV answers are in the receipt. "
+                      "Nothing to re-run.")
+        return
+    if sandbox.image_id() != r["sandbox_image"]:
+        console.print("[yellow]Sandbox image differs from the one in the receipt; results may differ.[/]")
+
+    oracle = None
+    rows = []
+    workdir = settings.state_dir / "work"
+    workdir.mkdir(parents=True, exist_ok=True)
+    if r.get("oracle"):
+        o = r["oracle"]
+        if _hashlib.sha256(o["test_code"].encode()).hexdigest() != o["test_sha256"]:
+            console.print("[red]Oracle test code does not match its recorded hash.[/]")
+            raise typer.Exit(1)
+        oracle = Oracle(issue=o["issue"], valid=True, test_code=o["test_code"], test_path=o["test_path"],
+                        test_sha256=o["test_sha256"])
+        tree = Path(tempfile.mkdtemp(prefix="receipt-base-", dir=workdir))
+        try:
+            source.export(pr.base_sha, tree)
+            (tree / o["test_path"]).parent.mkdir(parents=True, exist_ok=True)
+            (tree / o["test_path"]).write_text(o["test_code"])
+            base = sandbox.pytest(tree, [o["test_path"]], label="receipt_base")
+        finally:
+            _shutil.rmtree(tree, ignore_errors=True)
+        rows.append(("oracle on base code", "fail", base.outcome, base.outcome == "fail"))
+
+    result = verify(source, pr, oracle, DiffSignals(**r["signals"]), workdir)
+    for run in result.runs:
+        before = recorded.get(run["label"])
+        then = f"{before['outcome']} ({before['passed']}/{before['failed']})" if before else "-"
+        now = f"{run['outcome']} ({run['passed']}/{run['failed']})"
+        rows.append((run["label"], then, now, bool(before) and then == now))
+    table = Table("check", "receipt", "re-run now", "", title=f"Re-verifying {path.name} (no LLM calls)")
+    for name, then, now, ok in rows:
+        table.add_row(name, then, now, "[green]match[/]" if ok else "[red]DIFFERS[/]")
+    console.print(table)
+    if all(ok for *_, ok in rows):
+        console.print("[green]Reproduced:[/] the sandbox gives the same outcome as the receipt.")
+    else:
+        console.print("[red]Not reproduced.[/] See the differing rows.")
+        raise typer.Exit(1)

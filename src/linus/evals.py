@@ -9,6 +9,7 @@ from pathlib import Path
 HEADER = ("| When (UTC) | Label | Accuracy | False-pay | Missed-good | Human-flag "
           "| JEV $ | OpenAI tokens | Agent s/PR | Run |\n"
           "|---|---|---:|---:|---:|---:|---:|---:|---:|---|\n")
+# Rows written before per-PR dollar cost was tracked keep the original columns.
 
 
 def score(summary: dict, expected: dict) -> dict:
@@ -33,6 +34,7 @@ def score(summary: dict, expected: dict) -> dict:
         "human_flag_rate": len(flagged) / len(rows),
         "false_pay": false_pay, "missed_good": missed, "flagged": flagged,
         "jev_usd": cost["jev_usd"], "openai_tokens": cost["openai_tokens"],
+        "openai_usd": cost.get("openai_usd"), "usd_per_pr": cost.get("usd_per_pr"),
         "seconds_per_pr": cost["pr_seconds"] / max(cost["prs"], 1),
         "rows": rows,
     }

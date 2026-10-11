@@ -89,4 +89,4 @@ def check_invariants(allocations: list[Allocation], cap_fraction: float, min_pay
                     problems.append(f"#{n} paid without a verified receipt")
                 if n in already_paid:
                     problems.append(f"#{n} was already paid in an earlier approved run")
-    return problems
+    return list(dict.fromkeys(problems))  # one line per problem, not one per currency

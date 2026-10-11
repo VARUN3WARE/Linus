@@ -11,6 +11,17 @@ from openai import OpenAI
 
 from linus.config import Settings
 
+# USD per million tokens (input, output). gpt-5.4-mini list price as of Aug 2026;
+# check https://openai.com/api/pricing before relying on it.
+PRICES = {"gpt-5.4-mini": (0.75, 4.50)}
+
+
+def usd(model: str, prompt_tokens: int, completion_tokens: int) -> float | None:
+    for name, (price_in, price_out) in PRICES.items():
+        if model.startswith(name):
+            return (prompt_tokens * price_in + completion_tokens * price_out) / 1_000_000
+    return None
+
 
 @dataclass
 class Generation:

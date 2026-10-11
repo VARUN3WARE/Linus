@@ -29,7 +29,6 @@ class Settings:
             "JEV_MODEL": self.jev_model,
             "OPENAI_API_KEY": self.openai_api_key,
             "LINUS_OPENAI_MODEL": self.openai_model,
-            "NEATLOGS_API_KEY": self.neatlogs_api_key,
         }
         found = [f"{name} is empty" for name, value in required.items() if not value]
         if self.target_repo and self.target_repo.count("/") != 1:

@@ -23,12 +23,12 @@ from linus.allocate import allocate, check_invariants
 from linus.config import Settings
 from linus.diffcheck import DiffSignals
 from linus.jev import USD_PER_INPUT_TOKEN, Jev
-from linus.llm import Generator
+from linus.llm import Generator, usd
 from linus.oracle import Oracle
 from linus.policy import Policy
 from linus.source import Issue, LocalSource, PullRequest
 from linus.store import Store
-from linus.tracing import annotate, step
+from linus.tracing import annotate, step, trace_id_of
 
 VERDICT = {"verified": "pay", "not_fixed": "reject", "regression": "reject", "tampering": "reject",
            "needs_human": "flag", "inconclusive": "flag"}
@@ -118,14 +118,14 @@ class Close:
         return built
 
     def _finish(self, pr: PullRequest, span, data: dict, verdict: str, reason: str,
-                started: float, tokens0: tuple[int, int]) -> None:
+                started: float, tokens0: tuple[int, int, int]) -> None:
         data["verdict"], data["reason"] = verdict, reason
         data["seconds"] = round(time.monotonic() - started + data.get("seconds", 0), 2)
-        jev_tokens = self.jev.input_tokens - tokens0[0]
-        openai_tokens = self.gen.prompt_tokens + self.gen.completion_tokens - tokens0[1]
-        cost = data.setdefault("cost", {"jev_tokens": 0, "openai_tokens": 0})
-        cost["jev_tokens"] += jev_tokens
-        cost["openai_tokens"] += openai_tokens
+        cost = data.setdefault("cost", {})
+        for key, value in (("jev_tokens", self.jev.input_tokens - tokens0[0]),
+                           ("openai_in", self.gen.prompt_tokens - tokens0[1]),
+                           ("openai_out", self.gen.completion_tokens - tokens0[2])):
+            cost[key] = cost.get(key, 0) + value
         self.store.save_item(self.run_id, pr.number, "done", verdict, data)
         annotate(span, verdict=verdict, reason=reason)
         self.ui.item(pr, verdict, reason, data)
@@ -134,7 +134,7 @@ class Close:
         data = item["data"] if item else {}
         stage = item["stage"] if item else "queued"
         started = time.monotonic()
-        tokens0 = (self.jev.input_tokens, self.gen.prompt_tokens + self.gen.completion_tokens)
+        tokens0 = (self.jev.input_tokens, self.gen.prompt_tokens, self.gen.completion_tokens)
         with step(f"pr_{pr.number}", kind="AGENT", author=pr.author, title=pr.title) as span:
             issue = self._issue(pr)
             if stage == "queued":
@@ -286,8 +286,12 @@ class Close:
         }
 
     def _summary(self, pulls, items, allocations, problems, status) -> dict:
-        jev_tokens = sum(i["data"].get("cost", {}).get("jev_tokens", 0) for i in items.values())
-        openai_tokens = sum(i["data"].get("cost", {}).get("openai_tokens", 0) for i in items.values())
+        def total(key: str) -> int:
+            return sum(i["data"].get("cost", {}).get(key, 0) for i in items.values())
+
+        jev_tokens, openai_in, openai_out = total("jev_tokens"), total("openai_in"), total("openai_out")
+        openai_usd = usd(self.settings.openai_model, openai_in, openai_out)
+        jev_usd = jev_tokens * USD_PER_INPUT_TOKEN
         seconds = sum(i["data"].get("seconds", 0) for i in items.values())
         return {
             "run_id": self.run_id, "repo": self.source.name, "period": self.source.period, "status": status,
@@ -299,10 +303,14 @@ class Close:
             "allocations": [{"currency": a.currency, "budget": a.budget_cents / 100,
                              "payouts": {c: v / 100 for c, v in a.payouts.items()},
                              "rollover": a.rollover_cents / 100, "dropped": a.dropped} for a in allocations],
-            "cost": {"jev_tokens": jev_tokens, "jev_usd": round(jev_tokens * USD_PER_INPUT_TOKEN, 6),
-                     "openai_tokens": openai_tokens, "openai_model": self.settings.openai_model,
+            "cost": {"jev_tokens": jev_tokens, "jev_usd": round(jev_usd, 6),
+                     "openai_tokens": openai_in + openai_out, "openai_in": openai_in, "openai_out": openai_out,
+                     "openai_usd": round(openai_usd, 6) if openai_usd is not None else None,
+                     "openai_model": self.settings.openai_model,
+                     "usd_per_pr": round((jev_usd + (openai_usd or 0)) / max(len(pulls), 1), 6),
                      "pr_seconds": round(seconds, 1), "prs": len(pulls)},
             "run_dir": str(self.run_dir),
+            "trace_id": getattr(self, "trace_id", ""),
         }
 
     # -- the run --------------------------------------------------------------
@@ -316,6 +324,7 @@ class Close:
         pulls = self.source.pulls()
         with step("month_end_close", kind="WORKFLOW", run_id=self.run_id, repo=self.source.name,
                   period=self.source.period, prs=len(pulls), resumed=self.resumed) as root:
+            self.trace_id = trace_id_of(root)
             self.ui.plan(self, pulls)
             processed = 0
             for pr in pulls:
