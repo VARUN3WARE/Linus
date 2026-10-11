@@ -1,0 +1,30 @@
+[project]
+name = "linus"
+version = "0.1.0"
+description = "Month-end close for open-source bounties: pays only for proven work."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.40",
+    "neatlogs",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "rich>=13.7",
+    "typesafe-sdk>=0.7.4",
+]
+
+[project.scripts]
+linus = "linus.cli:app"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/linus"]

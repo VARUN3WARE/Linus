@@ -1,0 +1,30 @@
+# Rules for one bounty pool. The LLM only produces evidence-backed scores;
+# turning scores into money is plain code using the values below.
+
+budget:
+  cash_usd: 2000
+  credits:
+    aws_usd: 1000
+period: monthly
+
+eligible:
+  labels: [bounty]
+  include_reviews: true
+  include_docs: true
+
+weights:
+  difficulty: 0.5
+  impact: 0.3
+  review_quality: 0.2
+
+caps:
+  per_contributor_pct: 30
+  min_payout_usd: 10
+
+exclude:
+  bots: true
+  authors_file: .github/employees.txt
+
+verification:
+  require_fail_to_pass: true
+  flaky_reruns: 2
