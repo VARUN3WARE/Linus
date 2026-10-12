@@ -173,8 +173,10 @@ Re-running a month reuses the oracles (one per issue), so it costs only the
 JEV calls. The command also projects costs to 100, 1,000 and 10,000 PRs a month
 from labelled assumptions (`--price-per-repo`, default $49; `--sandbox-usd-per-pr`,
 default $0.005; `--real-repo-multiplier`, default 10x model cost). At the
-defaults, margin is 97% at 100 PRs and 72% at 1,000, and turns negative at
-10,000 PRs on a flat per-repo price, so pricing has to scale with volume.
+defaults, margin is 97% at 100 PRs and 72% at 1,000. At $0.0136 per PR,
+a flat $49 per repo breaks even at about 3,600 PRs a month (cfo.ai's Ari
+caught that our first framing, "negative around 10,000", was too loose), so
+pricing has to scale with volume.
 
 ## Quickstart
 

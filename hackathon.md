@@ -126,8 +126,9 @@ Measured by `uv run linus economics` over 8 cold runs, 110 PRs (`evals/economics
 - Model cost per PR: **$0.00086** (JEV $0.000054, OpenAI $0.00080).
 - Agent time 2.1 s per PR; 1.7 sandbox runs per PR.
 - Projection at the default assumptions ($49/repo/month, $0.005 sandbox per PR, 10x model
-  cost on real repos): gross margin 97% at 100 PRs/month, 72% at 1,000, negative at 10,000,
-  so pricing has to scale with PR volume.
+  cost on real repos, $0.0136/PR): gross margin 97% at 100 PRs/month, 72% at 1,000; flat
+  $49/repo breaks even at about 3,600 PRs/month (cfo.ai's Ari corrected our first
+  "around 10,000" framing), so pricing has to scale with PR volume.
 
 Assumptions to model (not measured yet):
 - Real repositories send more context per oracle: model cost $0.01 to $0.05 per PR.
