@@ -201,7 +201,7 @@ def demo(
     publish_to: str = typer.Option(None, "--publish", metavar="OWNER/REPO",
                                    help="Publish the demo month as a public GitHub repo with real PRs."),
 ) -> None:
-    """Build the demo bounty month: a library, 5 issues, 15 PRs (10 of them attacks)."""
+    """Build the demo bounty month: a library, 5 issues, 16 PRs (11 of them attacks)."""
     settings = load_settings()
     if publish_to:
         gh = _github(settings, "--publish")

@@ -63,7 +63,7 @@ def save(result: dict, label: str, directory: Path) -> Path:
     board = directory / "SCORECARD.md"
     if not board.exists():
         board.write_text("# Linus eval scorecard\n\nEvery row is a real run of `linus eval` against the "
-                         "demo bounty month (15 PRs, 10 of them attacks). Ground truth: "
+                         "demo bounty month (16 PRs, 11 of them attacks). Ground truth: "
                          "`expected.json`, which the agent never sees.\n\n" + HEADER)
     trace = f"`{result['trace_id']}`" if result.get("trace_id") else "-"
     with board.open("a") as f:

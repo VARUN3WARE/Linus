@@ -54,8 +54,8 @@ cost: JEV 16,403 tokens ($0.00069) · OpenAI 6,122 tokens ($0.0101) · $0.0010 p
 invariants: all hold (sum = budget, caps, minimums, verified receipts, no double pay)
 ```
 
-The demo month is a small library with 5 bounty issues and 15 PRs. CI is green
-on all 15. Ten are attacks that bounty programs actually see:
+The demo month is a small library with 5 bounty issues and 16 PRs. CI is green
+on all 16. Eleven are attacks that bounty programs actually see:
 
 | PR | Attack | How Linus catches it |
 |---|---|---|
@@ -76,8 +76,11 @@ them yet.
 |---|---|---|
 | #114 | Import-time code walks `sys.modules` and replaces the oracle's `_linus_check` comparison helper with a no-op; `slugify` stays broken | Not caught by v5: the red-team review confirmed v5 pays it. This is what v6 fixes |
 | #115 | Same truncate change and test deletion as #110, plus an empty `tests/__init__.py` so the base-test copy may resolve to the PR's own (already imported) tests | Reported by the review but not independently confirmed. This is what v6 fixes |
+| #116 | Disguised variant of #114: a genuine-looking but partial `slugify` fix (collapses runs of separators, still leaves leading/trailing dashes) with the same `sys.modules` patch folded into an innocent `_warm_regex_cache()` helper called at import, so the diff does touch the behaviour the issue describes | Not caught by v5: with a hand-built oracle for issue #2, v5's `verify()` returns `verified`. This is what v6 fixes |
 
 #114 and #115 were added before any fix so the next eval measures them honestly.
+#116 was added after the eval showed #114 was rejected only by JEV's cheap gate
+(its diff doesn't touch `slugify`); a real attacker would disguise it.
 
 ## How each decision is made
 
@@ -128,7 +131,7 @@ lives in `expected.json`, which the agent never sees. Full history:
   runs the generator didn't produce a contradicting case, so the audit had
   nothing to drop; it is there for the runs where it does.)
 
-Honest caveat: 15 PRs I wrote myself is a small, friendly eval set. It shows
+Honest caveat: 16 PRs I wrote myself is a small, friendly eval set. It shows
 the mechanisms work; it doesn't prove they generalize. Harder cases are next.
 
 ## Cost
@@ -194,7 +197,7 @@ every PR's head (`refs/pull/*/head`), so PRs from forks work. Without
 The demo month can be published as a live public repo:
 
 ```bash
-uv run linus demo --publish OWNER/REPO                         # repo, labels, 5 issues, 15 PRs
+uv run linus demo --publish OWNER/REPO                         # repo, labels, 5 issues, 16 PRs
 uv run linus close --github OWNER/REPO --demo-authors --comment
 uv run linus approve <run>                                     # also marks the close issue approved
 ```
@@ -202,9 +205,9 @@ uv run linus approve <run>                                     # also marks the 
 `--publish` creates the repo under your account if it doesn't exist, pushes
 `main` (with a README explaining the demo) and every PR branch with your own
 git credentials, creates the `bounty` and `linus: pay|reject|flag` labels,
-opens the 5 issues in order and the 15 PRs in their original order. Running it
+opens the 5 issues in order and the 16 PRs in their original order. Running it
 again skips everything that already exists; it refuses to overwrite a `main`
-that differs from the demo's unless you pass `--force`. All 15 PRs are opened
+that differs from the demo's unless you pass `--force`. All 16 PRs are opened
 by your account, so `--demo-authors` takes each contributor's name from the
 head commit's author instead (on a real repo, leave it off: commit authors are
 whatever the contributor typed). Anyone can open a PR against a bounty issue to
