@@ -250,7 +250,7 @@
     },
     {
       "run_id": "2026-09-20261012-032211-a52b",
-      "label": "v5 code vs disguised red-team attack #116 (before fix)",
+      "label": "v5 code, demo not yet rebuilt (#116 missing from this run)",
       "from": "eval+store",
       "repo": "demo/textkit",
       "cold": true,

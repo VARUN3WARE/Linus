@@ -52,7 +52,8 @@ profit on $2,524 of revenue.
 
 All labelled and editable in the model; these are hypotheses, not traction.
 
-- Two founders at $700 each per month, plus 10% payroll load.
+- Two founders at $700 each per month, plus 10% payroll load (the hackathon team is one
+  person; the model plans for a second founder).
 - Hosting $150 per month plus $1 per customer; support $2 per customer per
   month; tooling $100 per month.
 - No additional hires, financing, paid marketing or capital purchases.

@@ -1,6 +1,6 @@
 # Linus eval scorecard
 
-Every row is a real run of `linus eval` against the demo bounty month (11 PRs, 6 of them attacks, through v4; 13 PRs, 8 of them attacks, from v5 on). Ground truth: `expected.json`, which the agent never sees.
+Every row is a real run of `linus eval` against the demo bounty month (11 PRs, 6 of them attacks, through v4; 13 PRs, 8 attacks, for v4-vs-forgeries and v5; 16 PRs, 11 attacks, from v6 on). The traces of the two 02:31 and 02:46 rows didn't reach neatlogs. Ground truth: `expected.json`, which the agent never sees.
 
 | When (UTC) | Label | Accuracy | False-pay | Missed-good | Human-flag | JEV $ | OpenAI tokens | Agent s/PR | Run | Trace |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|---|

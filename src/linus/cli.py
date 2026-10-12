@@ -223,7 +223,7 @@ def demo(
         table.add_row(f"#{pr['number']}", pr["author"], pr["title"])
     console.print(table)
     console.print(f"{len(fixture['issues'])} bounty issues, {len(fixture['pulls'])} PRs. "
-                  "CI is green on every PR. Run [bold]uv run linus close[/].")
+                  "Every PR passes its own tests. Run [bold]uv run linus close[/].")
 
 
 GITHUB_OPT = typer.Option(None, "--github", metavar="OWNER/REPO", help="Read PRs from this GitHub repo "
@@ -501,8 +501,8 @@ def receipt(path: Path) -> None:
     recorded = {run["label"]: run for run in (r.get("verification") or {}).get("runs", [])}
     console.print(f"Receipt #{number} ({r['pr']['author']}): [bold]{r['verdict']}[/], {r['reason']}")
     if not recorded:
-        console.print("Decided by the cheap gates before the sandbox; the JEV answers are in the receipt. "
-                      "Nothing to re-run.")
+        console.print("Decided before the sandbox; the receipt records the diff checks (and JEV's answers, if the "
+                      "PR reached JEV). Nothing to re-run.")
         return
     if sandbox.image_id() != r["sandbox_image"]:
         console.print("[yellow]Sandbox image differs from the one in the receipt; results may differ.[/]")
@@ -516,9 +516,12 @@ def receipt(path: Path) -> None:
         if _hashlib.sha256(o["test_code"].encode()).hexdigest() != o["test_sha256"]:
             console.print("[red]Oracle test code does not match its recorded hash.[/]")
             raise typer.Exit(1)
-        oracle = Oracle(issue=o["issue"], valid=True, test_code=o["test_code"], test_path=o["test_path"],
-                        test_sha256=o["test_sha256"])
-        base = base_run(source, pr.base_sha, o["test_code"], workdir, "receipt_base")
+        oracle = Oracle.from_dict(o)
+        if oracle.format != FORMAT or not oracle.cases or render(oracle.imports, oracle.cases) != o["test_code"]:
+            console.print("[red]This receipt's oracle is from an older format or doesn't match its own cases; "
+                          "re-run the close to get a current receipt.[/]")
+            raise typer.Exit(1)
+        base = base_run(source, pr.base_sha, oracle.imports, oracle.cases, workdir, "receipt_base")
         rows.append(("oracle on base code", "fail", base.outcome, base.outcome == "fail"))
 
     result = verify(source, pr, oracle, DiffSignals(**r["signals"]), workdir)

@@ -526,13 +526,12 @@ can't prove, and proposes a payout ledger that a maintainer approves.
   behind it, labels it `linus: pay`, `linus: reject` or `linus: flag`, and
   posts a "Bounty close" issue with the leaderboard.
 
-## Try to fool the bot
+## Read the verdicts
 
-Anyone may [open a pull request](https://github.com/{repo}/compare) against a
-bounty issue (say `Fixes #N` in the description). Linus runs it in a sandbox
-with no network and posts its verdict on the PR at the next close.
-Wrong fixes, hard-coded answers, deleted tests, forged test runs and notes to
-AI reviewers are all fair game.
+Every PR here carries Linus's verdict as a comment, with the evidence behind
+it: the reproduction test on the old code and on the PR, the test runs, the
+cheap-gate signals, and the receipt hash. A month is settled once: after the
+maintainer approves the close, PRs opened in that month are not judged again.
 
 No real money is paid in this demo.
 

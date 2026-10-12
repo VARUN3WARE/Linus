@@ -1,0 +1,36 @@
+{
+  "what": "Replay of the v2 oracle case that rejected a correct PR through Linus's JEV audit (oracle.audit)",
+  "when_utc": "2026-10-12T08:04:33+00:00",
+  "jev_model": "jev-1.13.0",
+  "keep_threshold": 0.5,
+  "cases": [
+    {
+      "call": "slugify(\"Hello, World!\")",
+      "expected": "hello-world",
+      "raises": null,
+      "jev_consistent_p": 0.96,
+      "kept": true
+    },
+    {
+      "call": "slugify(\"Café & Tea / Coffee\")",
+      "expected": "caf--tea-coffee",
+      "raises": null,
+      "jev_consistent_p": 0.05,
+      "kept": false
+    },
+    {
+      "call": "slugify(\"Café & Tea / Coffee\")",
+      "expected": "caf-tea-coffee",
+      "raises": null,
+      "jev_consistent_p": 0.9,
+      "kept": true
+    },
+    {
+      "call": "slugify(\"x\")",
+      "expected": "-x-",
+      "raises": null,
+      "jev_consistent_p": 0.04,
+      "kept": false
+    }
+  ]
+}

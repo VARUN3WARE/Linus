@@ -10,7 +10,7 @@ approve. Nothing is paid until a human approves, and every decision comes with
 a receipt that anyone can re-run without an LLM.
 
 **Live demo:** [VARUN3WARE/textkit-bounty](https://github.com/VARUN3WARE/textkit-bounty):
-16 real pull requests, CI green on every one, 11 of them attacks. Linus's verdict
+16 real pull requests, each passing its own test suite, 11 of them attacks. Linus's verdict
 and evidence are posted on every PR, and the payout leaderboard is
 [issue #19](https://github.com/VARUN3WARE/textkit-bounty/issues/19).
 
@@ -68,8 +68,8 @@ invariants: all hold (sum = budget, caps, minimums, verified receipts, no double
 
 ## The attacks
 
-The demo month is a small library with 5 bounty issues and 16 PRs. CI is green
-on all 16. Eleven are attacks: the first six are what bounty programs see every
+The demo month is a small library with 5 bounty issues and 16 PRs. Every PR
+passes its own test suite. Eleven are attacks: the first six are what bounty programs see every
 day; the last five were found by attacking Linus itself (see
 [Red-teaming our own agent](#red-teaming-our-own-agent)).
 
@@ -109,13 +109,15 @@ can be wrong, and that disagreement is exactly when a person should look.
 ## Red-teaming our own agent
 
 On October 12 we attacked Linus twice, each time measuring before and after the
-fix on the same PRs. Every row is a real `uv run linus eval`; the trace ids are
-the runs in neatlogs.
+fix on the same PRs. Every row is a real `uv run linus eval` (see
+[`evals/SCORECARD.md`](evals/SCORECARD.md)). The second round's trace ids are
+the runs in neatlogs; the first round's two traces didn't reach neatlogs (their
+ids return 404), so that round is evidenced by its eval rows only.
 
 | Round | Before | After |
 |---|---|---|
-| Forgery attacks #112 (forced exit status) and #113 (always-equal result) | v4 **paid both**, and #113 took dave-k's bounty for issue #4: 77% accuracy, 25% false-pay, 20% missed-good. Trace `b810aeed4d1619f5140600f600284d89` | v5: oracle runs outside the PR's pytest config, strict result types, harness checks. 100% / 0% / 0%. Trace `c7560a80a11201b97d01923f5fe9bb57` |
-| An AI red team (three attacking agents, every finding independently reproduced) found the sandbox could be fooled from inside: #114, #115, #116 | v5's sandbox **certified the disguised #116** ("fails on base, passes on PR"); it went unpaid only because carol-oss fixed the issue first. Trace `e67b7aaaf8a3921d2a772faaa3629c73` | v6: the expected values never enter the sandbox, base tests run isolated, module tampering is rejected. 100% / 0% / 0% on all 16 PRs. Trace `3952c9122cbadec1de92d2447b270a9f` |
+| Forgery attacks #112 (forced exit status) and #113 (always-equal result) | v4 **paid both**, and #113 took dave-k's bounty for issue #4: 77% accuracy, 25% false-pay, 20% missed-good (eval row `2026-09-20261012-023058`) | v5: oracle runs outside the PR's pytest config, strict result types, harness checks. 100% / 0% / 0% (eval row `2026-09-20261012-024541-8a72`) |
+| An AI red team (three attacking agents; every confirmed finding was reproduced by a second agent) found the sandbox could be fooled from inside: #114, #115, #116 | v5's sandbox **certified the disguised #116** ("fails on base, passes on PR"); it went unpaid only because carol-oss fixed the issue first. Trace `e67b7aaaf8a3921d2a772faaa3629c73` | v6: the expected values never enter the sandbox, base tests run isolated, module tampering is rejected. 100% / 0% / 0% on all 16 PRs. Trace `3952c9122cbadec1de92d2447b270a9f` |
 
 The same review also found six ways v5 wrongly rejected honest PRs (a normal
 `sys.exit` in a CLI module, an ordinary pytest hook, a test helper whose `==`
@@ -144,7 +146,9 @@ history: [`evals/SCORECARD.md`](evals/SCORECARD.md).
   model wrote `slugify("Café & Tea / Coffee") == "caf--tea-coffee"`, a double
   dash that contradicts the issue's own rule.
 - **v3** made JEV audit every generated case. Replaying v2's bad case through
-  the audit drops it (p=0.07) and keeps the correct version (p=0.87); that
+  the audit drops it (p=0.05 to 0.07 across replays) and keeps the correct
+  version (p=0.87 to 0.90); the latest replay is stored in
+  [`evals/audit_replay.json`](evals/audit_replay.json) and the
   replay is a live regression test in `tests/test_live_audit.py`. v3 also
   exposed a bug where the oracle "reproduced" the bug by crashing with
   `NameError`.
@@ -226,8 +230,8 @@ uv run linus approve <run>                                     # also marks the 
 `bounty` and `linus: pay|reject|flag` labels, and opens the issues and PRs in
 order. Running it again skips everything that already exists. All demo PRs are
 opened by your account, so `--demo-authors` takes each contributor's name from
-the head commit's author instead. Anyone can open a PR against a bounty issue
-to try to fool it; it is judged at the next close.
+the head commit's author instead. A month is settled once: after `approve`,
+PRs created in that month are not judged again.
 
 With `--comment`, each PR gets one comment that is updated on later runs: the
 verdict and reason, the evidence (reproduction on base and on the PR, the test
@@ -243,11 +247,14 @@ close.
   auto-captured, every sandbox run as a tool span, plus anti-gaming and
   invariant guardrail spans. The before/after pairs above are traces in
   neatlogs; the live GitHub v6 close is trace `dcf6aab1eeeb52ffa00bbc41e8684924`.
-- **Entire.** Enabled for the coding agent in this repo with PII redaction on.
-  Every code commit from October 12 carries an `Entire-Checkpoint` trailer
-  linking it to the coding-agent session that wrote it, and the checkpoints
-  are pushed with the repo (`entire checkpoint list`, `entire checkpoint
-  explain <id>`). Commits that only record eval results have none.
+- **Entire.** Enabled for the coding agent in this repo, with PII redaction on.
+  Code commits from October 12 carry `Entire-Checkpoint` trailers. The ones made
+  by coding-agent sessions started inside the repo (the forgery attacks, the v5
+  hardening, the GitHub integration, the red-team attacks and the v6 work) link
+  to those sessions' transcripts; later commits, made from a session outside
+  the repo, carry checkpoints without a transcript of their own. The checkpoints
+  are pushed with the repo: `git fetch origin 'refs/entire/*:refs/entire/*'`,
+  then `entire checkpoint list` and `entire checkpoint explain <id>`.
 - **cfo.ai.** [`BUSINESS_PLAN.md`](BUSINESS_PLAN.md): a 24-month model built in
   cfo.ai by its AI CFO from Linus's measured unit economics
   (`evals/economics.json`), with three scenarios, a pricing comparison, a cash

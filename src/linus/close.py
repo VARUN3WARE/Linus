@@ -63,7 +63,7 @@ def corroboration(answers: dict, signals: DiffSignals) -> str:
     if answers.get("special_casing", {}).get("noul", 0) >= 0.8:
         notes.append(f"JEV: hard-codes literal inputs (p={answers['special_casing']['noul']:.2f})")
     if answers.get("claims_match", {}).get("noul", 1) <= 0.3:
-        notes.append(f"JEV: PR body claims changes the diff doesn't make (p={answers['claims_match']['noul']:.2f})")
+        notes.append(f"JEV: the PR body's claims match the diff only p={answers['claims_match']['noul']:.2f}")
     return f"; {'; '.join(notes)}" if notes else ""
 
 

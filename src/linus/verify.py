@@ -200,8 +200,9 @@ def verify(source: LocalSource, pr: PullRequest, oracle: Oracle | None,
             return _failing(own, "the PR's own tests", signals, runs)
 
         proof = "fails on base, passes on PR" if oracle else "docs only"
-        passed = sum(r.passed for r in (base, own) if r is not None)
-        reason = f"{proof}; base tests and the PR's tests green ({passed} passed)"
+        parts = [f"base tests green ({base.passed} passed)" if base is not None else "",
+                 f"the PR's own tests green ({own.passed} passed)" if own is not None else ""]
+        reason = f"{proof}; " + " and ".join(p for p in parts if p)
         if problems := layout_problems(base_files, _files(tree)):
             return Verification("needs_human", f"{reason}, but the PR {'; '.join(problems)}", runs)
         return Verification("verified", reason, runs)

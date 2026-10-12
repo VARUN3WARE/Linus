@@ -17,7 +17,7 @@ from linus import demo
 from linus.github import BOUNTY_LABEL, VERDICT_LABELS, GitHub, GitHubError, split_repo
 from linus.source import LINKED_ISSUE
 
-DESCRIPTION = "Live demo for Linus: a bounty month with real PRs. Open a PR, or try to fool the bot."
+DESCRIPTION = "Live demo for Linus: a bounty month with real PRs and public verdicts."
 
 
 class PublishError(Exception):

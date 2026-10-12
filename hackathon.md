@@ -32,10 +32,10 @@ writes a tamper-evident ledger for the maintainer to approve.
 
 | Tool | How we use it | Evidence |
 |---|---|---|
-| neatlogs | One trace per close: workflow span, agent span per PR, JEV calls as LLM spans with tokens and cost, auto-captured OpenAI calls, sandbox runs as tool spans, anti-gaming and invariant guardrails | Workflow `linus`. Before/after pairs: v4 paying two forgeries `b810aeed4d1619f5140600f600284d89` → v5 `c7560a80a11201b97d01923f5fe9bb57`; v5's sandbox certifying #116 `e67b7aaaf8a3921d2a772faaa3629c73` → v6 `3952c9122cbadec1de92d2447b270a9f`. Live GitHub v6 close `dcf6aab1eeeb52ffa00bbc41e8684924`. _Add dashboard screenshots._ |
-| Entire | Enabled for the coding agent in this repo (`.entire/`, agent hooks) with PII (email/phone) redaction on | Every code commit from Oct 12 has an `Entire-Checkpoint` trailer; 7 checkpoints are pushed to GitHub (`refs/entire/checkpoints/...`, `entire checkpoint list`). The Oct 11 session ran with the parent folder as its working directory, so the repo's hooks never loaded and it has none. |
+| neatlogs | One trace per close: workflow span, agent span per PR, JEV calls as LLM spans with tokens and cost, auto-captured OpenAI calls, sandbox runs as tool spans, anti-gaming and invariant guardrails | Workflow `linus`. Before/after in neatlogs: v5's sandbox certifying #116 `e67b7aaaf8a3921d2a772faaa3629c73` → v6 `3952c9122cbadec1de92d2447b270a9f`. Live GitHub v6 close `dcf6aab1eeeb52ffa00bbc41e8684924`. The forgery round's two traces (`b810aeed...`, `c7560a80...`) didn't reach neatlogs (404); that round is evidenced by its eval rows. _Add dashboard screenshots._ |
+| Entire | Enabled for the coding agent in this repo (`.entire/`, agent hooks) with PII (email/phone) redaction on | Code commits from Oct 12 carry `Entire-Checkpoint` trailers; those made by coding-agent sessions inside the repo (forgery attacks, v5, GitHub integration, red-team attacks, v6) link to the session transcripts, later ones made from outside the repo carry no transcript of their own. Pushed as `refs/entire/checkpoints/...`. The Oct 11 session ran with the parent folder as its working directory, so the repo's hooks never loaded and it has none. |
 | cfo.ai | Pricing, cost per verified PR, margins, runway | [`BUSINESS_PLAN.md`](BUSINESS_PLAN.md): 24-month model built in cfo.ai by Ari from `evals/economics.json` (Main/Growth/Downside, pricing comparison, cash simulator, risks). Ari corrected our break-even from ~10,000 to ~3,600 PRs/repo/month. _Share link: pending._ |
-| JEV | Gates, oracle audit, scoring levels | Every receipt records JEV's answers and model version (`jev-1.13.0`) |
+| JEV | Gates, oracle audit, scoring levels | Every receipt for a PR that reached the JEV gate records JEV's answers and model version (`jev-1.13.0`) |
 
 ## Build log
 
@@ -44,7 +44,7 @@ writes a tamper-evident ledger for the maintainer to approve.
 - Scaffold: config, neatlogs tracing, `linus doctor`. Read the JEV docs end to
   end: JEV is a decision model (Noul / Choice / Score), not a chat model, so the
   design became "JEV decides, OpenAI generates, tests prove, code pays".
-- Pipeline: demo month (11 PRs, 6 attacks, CI green on all), JEV gates, oracle
+- Pipeline: demo month (11 PRs, 6 attacks, each passing its own tests), JEV gates, oracle
   per issue, Docker sandbox, anti-gaming, allocation with invariants, receipts,
   hash-chained ledger, SQLite checkpoints, evals.
 - **v1:** every verdict correct, then crashed while settling: JEV score keys came
@@ -59,7 +59,8 @@ writes a tamper-evident ledger for the maintainer to approve.
   `slugify("Café & Tea / Coffee") == "caf--tea-coffee"`, contradicting the
   issue's single-dash rule. Missed-good 20%.
 - **v3:** JEV audits every generated case against the issue (drops that case at
-  p=0.07, keeps the correct one at p=0.87). Exposed a rendering bug: expected
+  p=0.05-0.07 across replays, keeps the correct one at p=0.87-0.90; stored in
+  evals/audit_replay.json). Exposed a rendering bug: expected
   values rendered as code (`== hello-world`), so the oracle "reproduced" the
   bug by crashing with NameError.
 - **v4:** expected values rendered from JSON with repr(); an oracle only counts
@@ -74,7 +75,7 @@ writes a tamper-evident ledger for the maintainer to approve.
 
 ### 2026-10-12
 
-- Audit of the whole project by six independent reviewers (each finding re-checked by a
+- Audit of the whole project by six AI review agents (each finding re-checked by a
   second agent). It found that Entire had recorded nothing (wrong working directory),
   overstated README claims, and a high-severity hole: a PR could forge its own green run.
   README claims corrected first.
@@ -84,11 +85,11 @@ writes a tamper-evident ledger for the maintainer to approve.
 - **Forgery round:** added #112 (conftest that forces pytest's exit status to 0) and #113 (an
   int whose `==` is always True, submitted before dave-k's honest fix). **v4 paid both** and
   #113 took dave-k's bounty: 77% accuracy, 25% false-pay, 20% missed-good
-  (trace `b810aeed...`).
+  (eval row `2026-09-20261012-023058`; its trace didn't reach neatlogs).
 - **v5:** oracle run from a Linus-owned directory with Linus's pytest config and no PR
   conftest, strict JSON result types, JUnit cross-checks, harness/outcome-manipulation diff
   checks, per-PR crash isolation, approve bound to the exact proposal, anti-gaming across
-  flagged PRs, invalid oracles not cached. 100% / 0% / 0% (trace `c7560a80...`).
+  flagged PRs, invalid oracles not cached. 100% / 0% / 0% (eval row `2026-09-20261012-024541-8a72`).
 - **Live on GitHub:** `linus demo --publish` created
   [VARUN3WARE/textkit-bounty](https://github.com/VARUN3WARE/textkit-bounty) with real PRs;
   `linus close --github ... --comment` posted a verdict with evidence on every PR and a
@@ -137,8 +138,7 @@ Measured by `uv run linus economics` over 8 cold runs, 110 PRs (`evals/economics
 Assumptions to model (not measured yet):
 - Real repositories send more context per oracle: model cost $0.01 to $0.05 per PR.
 - Hosted sandbox compute: $0.002 to $0.01 per PR.
-- Pricing options: a percentage of the pool processed (Algora reportedly
-  charges 20%; verify before citing), or flat tiers (for example $49/month for
+- Pricing options: a percentage of the pool processed, or flat tiers (for example $49/month for
   one repo up to 100 PRs, $199/month for five repos).
 - Scenarios: base and growth customer counts, team cost, runway.
 

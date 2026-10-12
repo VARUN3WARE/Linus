@@ -55,7 +55,7 @@ def test_publish_creates_the_repo_issues_and_prs_in_order(month, fake_github):
     local_main = git(root / "repo", "rev-parse", "main")
     assert git(bare, "rev-parse", "main^") == local_main
     readme = git(bare, "show", "main:README.md")
-    assert "https://github.com/VARUN3WARE/Linus" in readme and "Try to fool the bot" in readme
+    assert "https://github.com/VARUN3WARE/Linus" in readme and "Read the verdicts" in readme
     assert "No real money is paid" in readme and "commit" in readme
     assert git(root / "repo", "show", "main:README.md").startswith("# textkit\n")
     assert git(bare, "rev-parse", "pr/101") == git(root / "repo", "rev-parse", "pr/101")
