@@ -151,4 +151,4 @@ def test_github_source_uses_the_account_without_demo_authors(month, fake_github,
     assert {p.author for p in source.pulls()} == {"maintainer"}
     # A second source on the same clone fetches instead of cloning again.
     again = GitHubSource(REPO, _settings(tmp_path), "2026-10", client=fake_github.client(), remote=str(bare))
-    assert len(again.pulls()) == 12
+    assert len(again.pulls()) == len(demo.PULLS) - 1  # the last one is dated next month
