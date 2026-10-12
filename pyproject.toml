@@ -3,6 +3,7 @@ name = "linus"
 version = "0.1.0"
 description = "Month-end close for open-source bounties: pays only for proven work."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
     "openai>=1.40",
