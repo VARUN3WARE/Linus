@@ -14,3 +14,4 @@ Every row is a real run of `linus eval` against the demo bounty month (11 PRs, 6
 | 2026-10-11 08:47 | v4 cold run, per-PR cost tracked | 100% | 0% | 0% | 0% | $0.00069 | 6,122 | 2.2 | `2026-09-20261011-084734` | - |
 | 2026-10-12 02:31 | v4 code vs new forgery attacks (before fix) | 77% | 25% | 20% | 0% | $0.00077 | 6,167 | 2.5 | `2026-09-20261012-023058` | `b810aeed4d1619f5140600f600284d89` |
 | 2026-10-12 02:46 | v5 (forgery fixes: isolated oracle run, strict types, harness checks) | 100% | 0% | 0% | 0% | $0.00069 | 6,162 | 2.2 | `2026-09-20261012-024541-8a72` | `c7560a80a11201b97d01923f5fe9bb57` |
+| 2026-10-12 03:19 | v5 code vs red-team attacks #114/#115 (before fix) | 100% | 0% | 0% | 0% | $0.00077 | 6,493 | 2.0 | `2026-09-20261012-031911-a031` | `7ca70d0c09e3b52e76b0000f0e074042` |
