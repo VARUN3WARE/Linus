@@ -58,7 +58,8 @@ def test_forced_exit_status_conftest_is_an_outcome_hack(month):
     assert signals.harness_files == ["tests/conftest.py"]
     assert signals.manipulates_outcome
     assert any("exit status" in h for h in signals.outcome_hacks)
-    assert any("pytest_sessionfinish" in h for h in signals.outcome_hacks)
+    # Defining the hook is a harness edit (a human looks); assigning the exit status is the forgery.
+    assert not any("pytest_sessionfinish" in h for h in signals.outcome_hacks)
 
 
 def test_always_equal_eq_is_an_outcome_hack(month):

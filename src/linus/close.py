@@ -70,14 +70,24 @@ def corroboration(answers: dict, signals: DiffSignals) -> str:
 def oracle_record(oracle: Oracle) -> dict:
     """The oracle exactly as used, frozen into the PR's item at verification time:
     receipts are built from this, so a later run can't swap the shared cache under it."""
-    record = {k: getattr(oracle, k) for k in ("issue", "valid", "test_path", "test_sha256", "test_code",
-                                              "model", "cases", "dropped")}
+    record = {k: getattr(oracle, k) for k in ("issue", "valid", "format", "test_path", "test_sha256", "test_code",
+                                              "model", "imports", "cases", "dropped")}
     record["attempts"] = [{"attempt": a["attempt"], "proposed": a.get("proposed"), "kept": a.get("kept"),
                            "problem": a.get("problem"),
                            "base_outcome": (a.get("base_run") or {}).get("outcome"),
                            "base_failed": (a.get("base_run") or {}).get("failed")}
                           for a in oracle.attempts]
     return record
+
+
+class Halted(RuntimeError):
+    """The sandbox infrastructure failed mid-close. The PR it was judging keeps
+    its last saved stage, the run stays running, and `--resume` retries it."""
+
+    def __init__(self, run_id: str, pr: int, cause: Exception) -> None:
+        super().__init__(f"sandbox infrastructure failed on #{pr}: {cause}. Nothing was judged for it and run "
+                         f"{run_id} is still running: fix Docker, then `uv run linus close --resume latest`.")
+        self.run_id, self.pr = run_id, pr
 
 
 class Close:
@@ -154,8 +164,10 @@ class Close:
         self.ui.item(pr, verdict, reason, data)
 
     def process(self, pr: PullRequest, item: dict | None) -> None:
-        """Judge one PR. Any failure flags this PR for a human and the close goes
-        on: one malformed PR must not stop the month, or crash every resume."""
+        """Judge one PR. Any failure in the PR itself flags it for a human and the
+        close goes on: one malformed PR must not stop the month, or crash every
+        resume. A Docker failure says nothing about the PR, so it must not become
+        a verdict: the PR keeps its last saved stage and the close stops, resumable."""
         data = item["data"] if item else {}
         stage = item["stage"] if item else "queued"
         started = time.monotonic()
@@ -164,8 +176,11 @@ class Close:
             try:
                 verdict, reason = self._judge(pr, data, stage)
             except sandbox.InfrastructureError as exc:
+                saved = self.store.item(self.run_id, pr.number)
                 data["error"] = f"InfrastructureError: {exc}"
-                verdict, reason = "flag", f"sandbox infrastructure failed, nothing was judged: {exc}"
+                self.store.save_item(self.run_id, pr.number, saved["stage"] if saved else stage, None, data)
+                annotate(span, halted=str(exc))
+                raise Halted(self.run_id, pr.number, exc) from exc
             except Exception as exc:  # noqa: BLE001 - recorded on the PR, the run continues
                 data["error"] = f"{type(exc).__name__}: {exc}"
                 verdict, reason = "flag", f"could not process this PR: {data['error']}"
@@ -260,7 +275,15 @@ class Close:
                     f"#{issue} and was submitted earlier", flagged.number, sims[flagged.number])
         return None
 
+    def _refuse_if_settled(self) -> None:
+        """A period is paid once: a second run would book the budget again."""
+        approved = self.store.approved_run(self.source.name, self.source.period)
+        if approved and approved != self.run_id:
+            raise ValueError(f"{self.source.name} {self.source.period} was already settled by approved run "
+                             f"{approved}; refusing to close it again")
+
     def settle(self, pulls: list[PullRequest], items: dict[int, dict]) -> dict:
+        self._refuse_if_settled()
         policy = self.policy
         with step("settle", kind="CHAIN") as span:
             points: dict[str, float] = {}
@@ -357,6 +380,7 @@ class Close:
         return {
             "run_id": self.run_id, "repo": self.source.name, "period": self.source.period, "status": status,
             "source": getattr(self.source, "kind", "local"), "cold": not self.reuse_oracles,
+            "oracle_format": oracle_mod.FORMAT,
             "problems": problems,
             "verdicts": {pr.number: {"author": pr.author, "verdict": items[pr.number]["verdict"],
                                      "reason": items[pr.number]["data"].get("reason"),
@@ -378,17 +402,31 @@ class Close:
 
     # -- the run --------------------------------------------------------------
 
+    def _check_resumable(self) -> None:
+        existing = self.store.run(self.run_id)
+        if not existing:
+            raise ValueError(f"no run {self.run_id} to resume")
+        if existing["status"] != "running":
+            # A finished run's status (proposed, halted, approved) must never be overwritten.
+            raise ValueError(f"run {self.run_id} is {existing['status']}; only unfinished runs can be resumed")
+        # Verdicts reached under an older oracle format (e.g. v5's in-sandbox
+        # comparison, which a PR could patch) must not be carried into this one.
+        formats = {existing.get("oracle_format")} | {
+            (i["data"].get("oracle") or {}).get("format", existing.get("oracle_format"))
+            for i in self.store.items(self.run_id).values() if i["data"].get("oracle")}
+        if formats != {oracle_mod.FORMAT}:
+            old = sorted(str(f) for f in formats - {oracle_mod.FORMAT})
+            raise ValueError(f"run {self.run_id} was judged under oracle format {', '.join(old)}, and this Linus "
+                             f"judges with format {oracle_mod.FORMAT}; its verdicts can't be resumed. Start a "
+                             f"fresh close (`uv run linus close`).")
+
     def run(self) -> dict:
         if self.resumed:
-            existing = self.store.run(self.run_id)
-            if not existing:
-                raise ValueError(f"no run {self.run_id} to resume")
-            if existing["status"] != "running":
-                # A finished run's status (proposed, halted, approved) must never be overwritten.
-                raise ValueError(f"run {self.run_id} is {existing['status']}; only unfinished runs can be resumed")
+            self._check_resumable()
+        self._refuse_if_settled()
         pulls = self.source.pulls()  # before the run exists: a source that can't be read leaves no empty run
         if not self.resumed:
-            self.store.create_run(self.run_id, self.source.name, self.source.period)
+            self.store.create_run(self.run_id, self.source.name, self.source.period, oracle_mod.FORMAT)
         with step("month_end_close", kind="WORKFLOW", run_id=self.run_id, repo=self.source.name,
                   period=self.source.period, prs=len(pulls), resumed=self.resumed) as root:
             self.trace_id = trace_id_of(root)

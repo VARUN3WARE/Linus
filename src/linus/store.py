@@ -33,11 +33,22 @@ class Store:
         self.db = sqlite3.connect(path)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        columns = {r["name"] for r in self.db.execute("PRAGMA table_info(runs)")}
+        if "oracle_format" not in columns:  # databases from before v6; their runs read as format NULL
+            with self.db:
+                self.db.execute("ALTER TABLE runs ADD COLUMN oracle_format INTEGER")
 
-    def create_run(self, run_id: str, repo: str, period: str) -> None:
+    def create_run(self, run_id: str, repo: str, period: str, oracle_format: int | None = None) -> None:
+        """oracle_format: the oracle format the run's verdicts are reached under;
+        a run can only be resumed by a Linus that judges the same way."""
         with self.db:
-            self.db.execute("INSERT INTO runs VALUES (?, ?, ?, ?, 'running', '{}')",
-                            (run_id, now(), repo, period))
+            self.db.execute("INSERT INTO runs (id, created_at, repo, period, status, summary, oracle_format) "
+                            "VALUES (?, ?, ?, ?, 'running', '{}', ?)", (run_id, now(), repo, period, oracle_format))
+
+    def approved_run(self, repo: str, period: str) -> str | None:
+        row = self.db.execute("SELECT id FROM runs WHERE repo = ? AND period = ? AND status = 'approved' "
+                              "ORDER BY created_at LIMIT 1", (repo, period)).fetchone()
+        return row["id"] if row else None
 
     def run(self, run_id: str) -> dict | None:
         row = self.db.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()

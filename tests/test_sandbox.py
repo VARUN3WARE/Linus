@@ -1,3 +1,5 @@
+from pathlib import Path
+import json
 """Sandbox result handling, offline: Docker is replaced by a fake subprocess."""
 
 import subprocess
@@ -93,21 +95,21 @@ def test_missing_report_is_an_error(monkeypatch, tmp_path):
     assert sandbox.pytest(tmp_path / "tree", ["tests"], "t").outcome == "error"
 
 
-def test_oracle_runs_from_a_linus_owned_mount(monkeypatch, tmp_path):
+def test_oracle_calls_go_in_and_answers_stay_on_the_host(monkeypatch, tmp_path):
     seen = {}
 
     def run(cmd, **kwargs):
-        seen["cmd"] = cmd
-        return types.SimpleNamespace(returncode=1, stdout="", stderr="")
+        mount = next(p for p in cmd if p.endswith(":/linus-oracle:ro")).split(":")[0]
+        seen["cmd"], seen["spec"] = cmd, json.loads(Path(mount, "calls.json").read_text())
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(sandbox.subprocess, "run", run)
     (tmp_path / "tree" / "src").mkdir(parents=True)
-    sandbox.run_oracle(tmp_path / "tree", "def test_a():\n    pass\n", "t")
-    cmd = seen["cmd"]
-    assert any(p.endswith(":/work:ro") for p in cmd) and any(p.endswith(":/linus-oracle:ro") for p in cmd)
-    assert "--noconftest" in cmd and "-c" in cmd and "--rootdir=/linus-oracle" in cmd
-    assert cmd[cmd.index("-w") + 1] == "/linus-oracle"
-    assert "/work/src" in cmd and "-I" in cmd
+    sandbox.run_calls(tmp_path / "tree", ["import pkg"], ["pkg.f(1)"], "t", ["/work/src"])
+    cmd, spec = seen["cmd"], seen["spec"]
+    assert any(p.endswith(":/work:ro") for p in cmd) and "-I" in cmd
+    assert set(spec) == {"imports", "calls", "roots", "case_file", "timeout"}
+    assert "expected" not in json.dumps(spec)
 
 
 @pytest.mark.parametrize("returncode, stderr", [

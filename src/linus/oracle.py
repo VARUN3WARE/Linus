@@ -7,9 +7,13 @@ Three steps, each owned by the right tool:
 2. JEV audits every case against the issue's stated rules, in one request,
    and cases it finds inconsistent are dropped. (v2 lost a correct PR to a
    generated case that contradicted the issue; this is the fix.)
-3. Code renders the surviving cases into a pytest file, and the sandbox
-   proves it fails on the buggy base code for a real reason. If it doesn't,
-   the output goes back to the model for another try (bounded).
+3. The sandbox runs each surviving call on the buggy base code and the host
+   proves it fails there for a real reason. If it doesn't, the output goes
+   back to the model for another try (bounded).
+
+Only the imports and call expressions ever enter the sandbox. Each call runs
+in a fresh interpreter and the host compares what came back with the expected
+value, so code under test can't forge a pass without knowing the answer.
 """
 
 import ast
@@ -35,49 +39,22 @@ MIN_CASES = 2
 KEEP_THRESHOLD = 0.5  # JEV probability that a case is consistent with the issue
 SOURCE_BUDGET = 40_000  # characters of base source shown to the model
 TEST_NAME = ORACLE_FILE
-# Bumped when the rendered test changes meaning; cached oracles in an older format
-# are rebuilt (format 1 compared with a plain ==, which the result controls).
-FORMAT = 2
-TEST_DEF = re.compile(r"^def test_", re.M)
-# Failing on the base code only counts if the test fails for a real reason. A case
-# that calls the API wrongly fails on every version of the code (v3 "reproduced" a
-# bug with NameError), so these failures are authoring errors, not reproductions.
-REAL_FAILURES = ("AssertionError", "Failed: DID NOT RAISE")
-MISCALLS = re.compile(r"got an unexpected keyword argument|missing \d+ required (positional|keyword-only) "
-                      r"argument|takes (from )?\d+ (to \d+ )?positional arguments?|module '[\w.]+' has no "
-                      r"attribute|not a plain JSON value")
-
-# Every value case goes through _linus_check, so the result can't choose how it
-# compares: only exact JSON types pass (an int subclass whose __eq__ always
-# returns True does not), and the comparison is between JSON texts. json.dumps
-# and type are bound before the package under test is imported.
-HELPERS = '''
-_json_dumps, _type = json.dumps, type
-_JSON_TYPES = (str, int, float, bool, list, dict, type(None))
-
-
-def _linus_plain(value, where="result"):
-    kind = _type(value)
-    for allowed in _JSON_TYPES:
-        if kind is allowed:
-            break
-    else:
-        raise AssertionError(f"linus: {where} is a {kind.__name__}, not a plain JSON value")
-    if kind is list:
-        for item in value:
-            _linus_plain(item, where + "[]")
-    elif kind is dict:
-        for key, item in value.items():
-            if _type(key) is not str:
-                raise AssertionError(f"linus: {where} has a key that is not a plain JSON value")
-            _linus_plain(item, where + "[" + key + "]")
-
-
-def _linus_check(result, expected):
-    _linus_plain(result)
-    got, want = _json_dumps(result, sort_keys=True), _json_dumps(expected, sort_keys=True)
-    assert got == want, f"{got} != {want}"
-'''
+# Bumped when the oracle changes meaning; cached oracles in an older format are
+# rebuilt and runs judged under an older format can't be resumed. Format 1
+# compared with a plain ==, which the result controls; format 2 compared inside
+# the sandbox, where the PR's import-time code could patch the comparison;
+# format 3 compares on the host, against values that never enter the sandbox.
+FORMAT = 3
+# A base failure inside the package that names a function the case calls, with
+# the wrong arguments, is the case calling the API wrongly (through a wrapper),
+# not the bug.
+CALLEE_MISCALL = re.compile(r"(?:[\w.]+\.)?(\w+)\(\) (?:got an unexpected keyword argument|missing \d+ "
+                            r"required (?:positional|keyword-only) argument|takes (?:from )?\d+ (?:to \d+ )?"
+                            r"positional arguments?)")
+# The rendered file is for people (receipts, report): Linus never runs it.
+HEADER = ('"""Linus oracle, readable copy. Linus does not run this file: each call runs in a fresh\n'
+          "interpreter in the sandbox, and the host compares the JSON text of the result with the\n"
+          'expected value, which never enters the sandbox."""')
 
 SYSTEM = """You write reproduction test cases for bug reports in Python projects.
 
@@ -105,19 +82,20 @@ Rules:
 class Oracle:
     issue: int
     valid: bool
-    test_code: str = ""
+    test_code: str = ""  # readable rendering of imports + cases; its sha256 binds the receipt
     test_sha256: str = ""
     test_path: str = ""
-    cases: list[dict] = field(default_factory=list)
+    cases: list[dict] = field(default_factory=list)  # call, expected (a JSON value), raises, from_issue
     dropped: list[dict] = field(default_factory=list)
     attempts: list[dict] = field(default_factory=list)
     model: str = ""
     format: int = FORMAT
+    imports: list[str] = field(default_factory=list)
 
     @property
     def case_count(self) -> int:
-        """Tests in the rendered file: a PR passes only if every one of them ran and passed."""
-        return len(TEST_DEF.findall(self.test_code))
+        """A PR passes only if every case ran and passed."""
+        return len(self.cases)
 
     def to_dict(self) -> dict:
         return self.__dict__.copy()
@@ -139,43 +117,100 @@ def _parse_cases(text: str) -> tuple[list[str], list[dict]]:
                 continue
         except (SyntaxError, KeyError, TypeError):
             continue
-        # Expected values arrive as JSON and are rendered with repr(), so a string
-        # like "hello-world" can never be read as Python code (v3 bug).
-        expected = None if case.get("raises") else repr(case.get("expected"))
+        # Expected values stay JSON values: the host compares them as JSON text,
+        # and they are only rendered (with repr) into the readable copy.
+        expected = None if case.get("raises") else case.get("expected")
         cases.append({"call": case["call"], "expected": expected,
                       "raises": case.get("raises"), "from_issue": bool(case.get("from_issue"))})
     return imports, cases
 
 
 def render(imports: list[str], cases: list[dict]) -> str:
-    lines = ["import json", "", "import pytest", HELPERS, *imports, ""]
+    """The oracle as a pytest file a person can read and run by hand."""
+    lines = [HEADER, "", "import pytest", "", *imports, ""]
     for i, case in enumerate(cases):
         lines += ["", f"def test_repro_{i}():"]
         if case["raises"]:
             lines += [f"    with pytest.raises({case['raises']}):", f"        {case['call']}"]
         else:
-            lines.append(f"    _linus_check({case['call']}, {case['expected']})")
+            lines.append(f"    assert {case['call']} == {case['expected']!r}")
     return "\n".join(lines) + "\n"
 
 
+def check(case: dict, result: dict) -> tuple[str, str]:
+    """The host's verdict on one call: ("passed", "") or (why it failed, message).
+
+    A value passes only if the result is plain JSON all the way down and its
+    JSON text equals the expected value's; a raises case only if the exception
+    type name matches. A missing or garbled result line fails."""
+    if not result["ok"]:
+        if result.get("missing"):
+            return "missing", result["error"]
+        if case["raises"] and result["error"].split(":", 1)[0] == case["raises"].rsplit(".", 1)[-1]:
+            return "passed", ""
+        return "error", result["error"]
+    if case["raises"]:
+        return "no_raise", f"DID NOT RAISE {case['raises']}"
+    if not result["plain"]:
+        return "not_plain", "result is not a plain JSON value"
+    got = json.dumps(result["value"], sort_keys=True)
+    want = json.dumps(case["expected"], sort_keys=True)
+    if got == want:
+        return "passed", ""
+    return "mismatch", f"{got[:200]} != {want[:200]}"
+
+
+def judge(cases: list[dict], run: sandbox.CallsRun, label: str) -> RunResult:
+    """Compare the container's raw results with the expected values, on the host."""
+    rows = []
+    for i, (case, result) in enumerate(zip(cases, run.results)):
+        kind, message = check(case, result)
+        rows.append({"name": f"test_repro_{i}", "call": case["call"],
+                     "outcome": "passed" if kind == "passed" else "failure", "kind": kind,
+                     "message": message, "where": result.get("where", ""), "both": False})
+    bad = [r for r in rows if r["outcome"] == "failure"]
+    return RunResult(
+        label=label, command=f"linus oracle driver: {len(cases)} calls, one fresh interpreter each",
+        exit_code=run.exit_code if run.problem else int(bool(bad)),
+        passed=len(rows) - len(bad), failed=len(bad), errors=0, duration_s=run.duration_s,
+        timed_out=run.timed_out, output_tail=run.output_tail,
+        failed_tests=[r["name"] for r in bad], failures=[r["message"] for r in bad],
+        problem=run.problem, cases=rows,
+    )
+
+
+def run(tree: Path, imports: list[str], cases: list[dict], label: str, roots: list[str]) -> RunResult:
+    calls = sandbox.run_calls(tree, imports, [c["call"] for c in cases], label, roots)
+    return judge(cases, calls, label)
+
+
 def reproduces(case: dict) -> bool:
-    """A base failure that shows the bug: an assertion, DID NOT RAISE, or an
-    exception raised inside the package. Not one raised by the call expression
-    itself (wrong arguments, a name the module doesn't have)."""
-    message = case.get("message", "")
-    if MISCALLS.search(message):
-        return False
-    if message.startswith(REAL_FAILURES):
+    """A base failure that shows the bug, decided by location first: a wrong
+    value, DID NOT RAISE, or an exception whose deepest frame is in the code
+    under test. An exception from the case expression itself, the stdlib or
+    site-packages is an authoring error, and so is one inside the package that
+    names a function the case calls with the wrong arguments (a wrapper)."""
+    kind = case.get("kind")
+    if kind in ("mismatch", "no_raise"):
         return True
-    where = case.get("where", "")
-    return bool(where) and Path(where).name != ORACLE_FILE
+    if kind != "error" or not case.get("where", "").startswith(sandbox.SRC_MOUNT + "/"):
+        return False
+    miscall = CALLEE_MISCALL.search(case.get("message", ""))
+    return not (miscall and re.search(rf"\b{re.escape(miscall.group(1))}\s*\(", case.get("call", "")))
 
 
-def base_run(source: LocalSource, base_sha: str, code: str, workdir: Path, label: str) -> RunResult:
+def _outcomes(result: RunResult) -> str:
+    """Each case's result on the base code, for the model's next attempt."""
+    return "\n".join(f"- {c['call']}: {'passed' if c['outcome'] == 'passed' else c['message'][:200]}"
+                     for c in result.cases)
+
+
+def base_run(source: LocalSource, base_sha: str, imports: list[str], cases: list[dict], workdir: Path,
+             label: str) -> RunResult:
     tree = Path(tempfile.mkdtemp(prefix="base-", dir=workdir))
     try:
         source.export(base_sha, tree)
-        return sandbox.run_oracle(tree, code, label=label)
+        return run(tree, imports, cases, label, sandbox.import_roots(source.files_at(base_sha)))
     finally:
         shutil.rmtree(tree, ignore_errors=True)
 
@@ -245,9 +280,8 @@ def build(gen: Generator, jev: Jev, source: LocalSource, issue: Issue, base_sha:
                             f"it: {json.dumps([{k: c[k] for k in ('call', 'expected')} for c in dropped])}")
                 continue
 
-            code = render(imports, kept)
             label = f"oracle_{issue.number}_try{attempt}"
-            result = base_run(source, base_sha, code, workdir, label)
+            result = base_run(source, base_sha, imports, kept, workdir, label)
             record["base_run"] = result.to_dict()
 
             miscalled = [c for c in result.cases if c["outcome"] == "failure" and not reproduces(c)]
@@ -258,28 +292,27 @@ def build(gen: Generator, jev: Jev, source: LocalSource, issue: Issue, base_sha:
                 if len(survivors) >= MIN_CASES and len(survivors) < len(kept):
                     dropped += [c | {"why": "fails on base by calling the API wrongly"}
                                 for i, c in enumerate(kept) if f"test_repro_{i}" in names]
-                    kept, code = survivors, render(imports, survivors)
-                    result = base_run(source, base_sha, code, workdir, label + "_trimmed")
+                    kept = survivors
+                    result = base_run(source, base_sha, imports, kept, workdir, label + "_trimmed")
                     record["base_run"] = result.to_dict()
                     miscalled = [c for c in result.cases if c["outcome"] == "failure" and not reproduces(c)]
-            if miscalled or (result.outcome == "error" and result.errors):
-                why = miscalled[0]["message"] if miscalled else "errors while collecting or setting up the tests"
+            if miscalled:
+                why = f"{miscalled[0]['call']}: {miscalled[0]['message']}"
                 record["problem"] = "test is broken: " + why[:120]
-                feedback = ("The test file itself is broken: it fails on its own errors (calling the API "
-                            f"wrongly, unknown names) rather than on the bug: {why}\n\n"
-                            f"pytest output:\n{result.output_tail}")
+                feedback = ("Some cases fail on their own errors (calling the API wrongly, unknown names, "
+                            f"results that are not plain JSON) rather than on the bug:\n{_outcomes(result)}")
                 continue
             if result.outcome == "fail" and result.failed >= 1:
                 oracle.valid = True
-                oracle.test_code = code
-                oracle.test_sha256 = hashlib.sha256(code.encode()).hexdigest()
-                oracle.cases, oracle.dropped = kept, dropped
+                oracle.imports, oracle.cases, oracle.dropped = imports, kept, dropped
+                oracle.test_code = render(imports, kept)
+                oracle.test_sha256 = hashlib.sha256(oracle.test_code.encode()).hexdigest()
                 break
             if result.outcome == "pass":
-                feedback = ("Every case passed on the current buggy code, so they do not reproduce the "
-                            f"bug.\n\npytest output:\n{result.output_tail}")
+                feedback = "Every case passed on the current buggy code, so they do not reproduce the bug."
             else:
-                feedback = f"The rendered test file did not run cleanly.\n\npytest output:\n{result.output_tail}"
+                feedback = (f"The cases did not run cleanly ({result.problem or 'no results'}).\n\n"
+                            f"Output:\n{result.output_tail}")
         annotate(span, valid=oracle.valid, attempts=len(oracle.attempts),
                  cases=len(oracle.cases), dropped=oracle.dropped)
     return oracle

@@ -26,76 +26,79 @@ def fakepkg(monkeypatch):
     return module
 
 
-def _run(code: str) -> dict[str, str]:
-    """Execute a rendered oracle in-process: test name -> 'passed' or the failure."""
-    namespace: dict = {}
-    exec(compile(code, "test_linus_repro.py", "exec"), namespace)
-    results = {}
-    for name, fn in namespace.items():
-        if name.startswith("test_"):
-            try:
-                fn()
-                results[name] = "passed"
-            except BaseException as exc:  # noqa: BLE001 - pytest.raises failures are BaseException
-                results[name] = f"{type(exc).__name__}: {exc}"
-    return results
+CASE_SCRIPT = None
 
 
-def _code(*cases) -> str:
-    text = json.dumps({"imports": ["import fakepkg"], "cases": [
-        {"call": call, "expected": expected, "raises": raises} for call, expected, raises in cases]})
-    imports, parsed = _parse_cases(text)
-    return render(imports, parsed)
+def _case(tmp_path, source: str, call: str) -> dict:
+    """Run the real per-call script on a throwaway package, as the container does."""
+    import subprocess
+
+    pkg = tmp_path / "pkgroot"
+    (pkg / "fakepkg").mkdir(parents=True, exist_ok=True)
+    (pkg / "fakepkg" / "__init__.py").write_text(source)
+    script = tmp_path / "linus_case.py"
+    script.write_text(sandbox.CASE)
+    out = subprocess.run([sys.executable, "-I", "-B", str(script), str(pkg), json.dumps(["import fakepkg"]),
+                          call], capture_output=True, text=True, timeout=30)
+    return json.loads(out.stdout.strip().splitlines()[-1])
 
 
-def test_strict_oracle_rejects_an_always_equal_result(fakepkg):
-    fakepkg.f = lambda: AlwaysEqual(5)
-    result = _run(_code(("fakepkg.f()", 2, None)))
-    assert result["test_repro_0"].startswith("AssertionError: linus: result is a AlwaysEqual")
+def test_always_equal_result_is_not_plain_json(tmp_path):
+    source = "class AlwaysEqual(int):\n    def __eq__(self, other):\n        return True\n\n" \
+             "    __hash__ = int.__hash__\n\n\ndef f():\n    return AlwaysEqual(5)\n"
+    result = _case(tmp_path, source, "fakepkg.f()")
+    assert result["ok"] and result["plain"] is False
+    kind, _ = oracle_mod.check({"expected": 2, "raises": None}, result)
+    assert kind == "not_plain"
 
 
-def test_strict_oracle_compares_exact_json(fakepkg):
-    fakepkg.f = lambda: {"b": [1, "x", None], "a": True}
-    fakepkg.g = lambda: 1
-    fakepkg.h = lambda: (1, 2)
-    fakepkg.k = lambda: {1: "x"}
-    fakepkg.boom = lambda: int("x")
-    result = _run(_code(("fakepkg.f()", {"a": True, "b": [1, "x", None]}, None),
-                        ("fakepkg.g()", True, None),
-                        ("fakepkg.h()", [1, 2], None),
-                        ("fakepkg.k()", {"1": "x"}, None),
-                        ("fakepkg.boom()", None, "ValueError")))
-    assert result["test_repro_0"] == "passed"
-    assert result["test_repro_1"].startswith("AssertionError")  # 1 is not true
-    assert "not a plain JSON value" in result["test_repro_2"]  # tuple
-    assert "not a plain JSON value" in result["test_repro_3"]  # int key
-    assert result["test_repro_4"] == "passed"
+def test_host_compares_exact_json():
+    def judged(expected, value, plain=True, raises=None):
+        return oracle_mod.check({"expected": expected, "raises": raises},
+                                {"ok": True, "value": value, "plain": plain})[0]
+
+    assert judged({"a": True, "b": [1, "x", None]}, {"b": [1, "x", None], "a": True}) == "passed"
+    assert judged(True, 1) == "mismatch"  # JSON keeps true and 1 apart
+    assert judged([1, 2], [1, 2], plain=False) == "not_plain"  # e.g. a tuple
+    assert oracle_mod.check({"expected": None, "raises": "ValueError"},
+                            {"ok": False, "error": "ValueError: bad", "where": "/work/src/p.py"})[0] == "passed"
+    assert oracle_mod.check({"expected": 1, "raises": None},
+                            {"ok": False, "error": "linus: no result", "where": "", "missing": True})[0] == "missing"
 
 
-def test_case_count_counts_rendered_tests(fakepkg):
-    code = _code(("fakepkg.f()", 1, None), ("fakepkg.f()", 2, None))
-    assert Oracle(issue=1, valid=True, test_code=code).case_count == 2
+def test_case_count_counts_cases():
+    cases = [{"call": "f()", "expected": 1, "raises": None}, {"call": "f()", "expected": 2, "raises": None}]
+    assert Oracle(issue=1, valid=True, cases=cases).case_count == 2
 
 
 @pytest.mark.parametrize("case, real", [
-    ({"message": "AssertionError: 2 != 3", "where": "test_linus_repro.py"}, True),
-    ({"message": "Failed: DID NOT RAISE <class 'ValueError'>", "where": "test_linus_repro.py"}, True),
-    ({"message": "TypeError: unsupported operand", "where": "/work/src/pkg/core.py"}, True),
-    ({"message": "TypeError: f() got an unexpected keyword argument 'x'", "where": "test_linus_repro.py"}, False),
-    ({"message": "TypeError: f() missing 1 required positional argument: 'n'", "where": "test_linus_repro.py"},
-     False),
-    ({"message": "TypeError: f() takes 1 positional argument but 2 were given", "where": "/work/src/a.py"},
-     False),
-    ({"message": "AttributeError: module 'pkg' has no attribute 'g'", "where": "test_linus_repro.py"}, False),
-    ({"message": "TypeError: bad operand", "where": "test_linus_repro.py"}, False),
-    ({"message": "AssertionError: linus: result is a tuple, not a plain JSON value", "where": ""}, False),
+    ({"kind": "mismatch", "message": "2 != 3", "where": "", "call": "f(1)"}, True),
+    ({"kind": "no_raise", "message": "DID NOT RAISE ValueError", "where": "", "call": "f(1)"}, True),
+    ({"kind": "error", "message": "TypeError: unsupported operand", "where": "/work/src/pkg/core.py",
+      "call": "f(1)"}, True),
+    ({"kind": "error", "message": "TypeError: f() got an unexpected keyword argument 'x'", "where": "<linus-case>",
+      "call": "f(1, x=1)"}, False),
+    ({"kind": "error", "message": "TypeError: f() takes 1 positional argument but 2 were given",
+      "where": "/work/src/a.py", "call": "f(1, 2)"}, False),
+    ({"kind": "error", "message": "AttributeError: module 'pkg' has no attribute 'g'", "where": "<linus-case>",
+      "call": "pkg.g()"}, False),
+    ({"kind": "error", "message": "TypeError: bad operand", "where": "/usr/lib/python3.12/re/__init__.py",
+      "call": "f(1)"}, False),
+    ({"kind": "not_plain", "message": "result is not a plain JSON value", "where": "", "call": "f(1)"}, False),
 ])
 def test_only_real_reproductions_count(case, real):
     assert reproduces(case) is real
 
 
-def _result(cases: list[tuple[str, str, str, str]]) -> RunResult:
-    rows = [{"name": n, "outcome": o, "message": m, "where": w, "both": False} for n, o, m, w in cases]
+def _kind(outcome: str, message: str) -> str:
+    if outcome == "passed":
+        return "passed"
+    return "mismatch" if message.startswith("AssertionError") else "error"
+
+
+def _result(cases: list[tuple[str, str, str, str]], calls=("f(1)", "f(2)", "f(1, x=1)")) -> RunResult:
+    rows = [{"name": n, "outcome": o, "message": m, "where": w, "both": False, "kind": _kind(o, m),
+             "call": calls[i] if i < len(calls) else "f()"} for i, (n, o, m, w) in enumerate(cases)]
     failed = sum(r["outcome"] == "failure" for r in rows)
     return RunResult(label="t", command="", exit_code=1 if failed else 0,
                      passed=sum(r["outcome"] == "passed" for r in rows), failed=failed, errors=0,
@@ -122,13 +125,13 @@ def test_cases_that_call_the_api_wrongly_are_dropped(monkeypatch, tmp_path):
     monkeypatch.setattr(oracle_mod, "audit", lambda jev, issue, cases: [0.9] * len(cases))
     runs = []
 
-    def fake_base_run(source, base_sha, code, workdir, label):
-        runs.append(code)
+    def fake_base_run(source, base_sha, imports, cases, workdir, label):
+        runs.append([c["call"] for c in cases])
         if len(runs) == 1:
             return _result([("test_repro_0", "failure", "AssertionError: 1 != 2", "test_linus_repro.py"),
                             ("test_repro_1", "passed", "", ""),
                             ("test_repro_2", "failure", "TypeError: f() got an unexpected keyword argument 'x'",
-                             "test_linus_repro.py")])
+                             "<linus-case>")])
         return _result([("test_repro_0", "failure", "AssertionError: 1 != 2", "test_linus_repro.py"),
                         ("test_repro_1", "passed", "", "")])
 
@@ -139,13 +142,13 @@ def test_cases_that_call_the_api_wrongly_are_dropped(monkeypatch, tmp_path):
     assert built.valid and gen.calls == 1
     assert [c["call"] for c in built.cases] == ["f(1)", "f(2)"]
     assert built.dropped[0]["call"] == "f(1, x=1)"
-    assert "x=1" not in built.test_code and built.test_code == runs[-1]
+    assert "x=1" not in built.test_code and runs[-1] == ["f(1)", "f(2)"]
 
 
 def test_a_reproduction_made_only_of_miscalls_is_an_authoring_error(monkeypatch, tmp_path):
     monkeypatch.setattr(sandbox, "image_id", lambda: "img")
     monkeypatch.setattr(oracle_mod, "audit", lambda jev, issue, cases: [0.9] * len(cases))
-    miscall = ("failure", "TypeError: f() missing 1 required positional argument: 'n'", "test_linus_repro.py")
+    miscall = ("failure", "TypeError: f() missing 1 required positional argument: 'n'", "<linus-case>")
     monkeypatch.setattr(oracle_mod, "base_run", lambda *a: _result(
         [(f"test_repro_{i}", *miscall) for i in range(3)]))
     monkeypatch.setattr(oracle_mod, "_context", lambda *a: ("", ""))

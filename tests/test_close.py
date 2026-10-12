@@ -123,7 +123,7 @@ def test_oracles_in_an_old_format_are_rebuilt(tmp_path, monkeypatch):
     assert close._oracle(types.SimpleNamespace(number=1), _pr(1), DiffSignals()).test_code == "new"
 
 
-def test_docker_failure_flags_the_pr_and_caches_nothing(tmp_path, monkeypatch):
+def test_docker_failure_halts_and_keeps_the_pr_resumable(tmp_path, monkeypatch):
     close = _close(tmp_path, monkeypatch, [_pr(1)])
     close.source.issues = {1: types.SimpleNamespace(number=1, labels=("bounty",))}
 
@@ -133,9 +133,11 @@ def test_docker_failure_flags_the_pr_and_caches_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(close_mod.oracle_mod, "build", broken)
     item = {"stage": "gated", "verdict": None, "data": {"signals": asdict(DiffSignals(code_files=["a.py"])),
                                                          "issue": 1}}
-    close.process(_pr(1), item)
+    with pytest.raises(close_mod.Halted):
+        close.process(_pr(1), item)
     saved = close.store.item(close.run_id, 1)
-    assert saved["verdict"] == "flag" and "infrastructure" in saved["data"]["reason"]
+    assert saved["stage"] == "gated" and saved["verdict"] is None
+    assert "InfrastructureError" in saved["data"]["error"]
     assert close.store.oracle(close.source.name, 1, "base") is None
 
 

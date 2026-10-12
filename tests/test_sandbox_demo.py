@@ -27,13 +27,14 @@ CASES = {
     5: [('truncate("abcdefghij", 5)', "ab..."), ('truncate("short", 10)', "short"),
         ('truncate("abc", 3)', "abc"), ('truncate("abcdefgh", 7)', "abcd...")],
 }
-ISSUE_OF = {101: 1, 103: 3, 106: 2, 109: 4, 112: 5, 113: 4}
+ISSUE_OF = {101: 1, 103: 3, 106: 2, 109: 4, 112: 5, 113: 4, 114: 2, 115: 5, 116: 2}
 
 
 def oracle_for(issue: int) -> Oracle:
-    cases = [{"call": call, "expected": repr(value), "raises": None, "from_issue": True}
+    cases = [{"call": call, "expected": value, "raises": None, "from_issue": True}
              for call, value in CASES[issue]]
-    return Oracle(issue=issue, valid=True, test_code=render(IMPORTS, cases), test_path=TEST_NAME, cases=cases)
+    return Oracle(issue=issue, valid=True, test_code=render(IMPORTS, cases), test_path=TEST_NAME, cases=cases,
+                  imports=IMPORTS)
 
 
 @pytest.fixture(scope="module")
@@ -56,7 +57,8 @@ def _verify(month, number: int):
 def test_hand_oracles_fail_on_base_for_real_reasons(month, issue):
     source, pulls, work = month
     base = next(iter(pulls.values())).base_sha
-    result = base_run(source, base, oracle_for(issue).test_code, work, f"base_{issue}")
+    oracle = oracle_for(issue)
+    result = base_run(source, base, oracle.imports, oracle.cases, work, f"base_{issue}")
     assert result.outcome == "fail", result.output_tail
     assert all(reproduces(c) for c in result.cases if c["outcome"] == "failure")
 
@@ -76,6 +78,19 @@ def test_always_equal_int_subclass_fails_the_strict_oracle(month):
     result = _verify(month, 113)
     assert result.outcome == "not_fixed", (result.reason, result.runs)
     assert any("not a plain JSON value" in f for f in result.runs[0]["failures"])
+
+
+@pytest.mark.parametrize("number", [114, 116])
+def test_patching_the_comparison_in_sys_modules_cannot_forge_a_pass(month, number):
+    """v5 compared inside the container, so a PR could patch the comparison at
+    import. The expected values now never enter the sandbox."""
+    result = _verify(month, number)
+    assert result.outcome == "not_fixed", (result.reason, result.runs)
+
+
+def test_tests_package_cannot_hide_a_deleted_test(month):
+    result = _verify(month, 115)
+    assert result.outcome != "verified", (result.reason, result.runs)
 
 
 def test_forced_exit_status_is_caught_in_the_suite_run_too(tmp_path):

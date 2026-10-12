@@ -20,7 +20,7 @@ from typesafe_sdk import Noul
 
 from linus import demo as demo_mod
 from linus import economics, evals, github_report, ledger, publish, report
-from linus.close import Close
+from linus.close import Close, Halted
 from linus.config import Settings, load_settings
 from linus.github import GitHub, GitHubError
 from linus.jev import Jev
@@ -237,6 +237,9 @@ def _run_source_close(settings: Settings, source: LocalSource, run_id: str | Non
                       reuse_oracles: bool = True) -> dict:
     try:
         return _run_close(settings, source, run_id, crash_after, reuse_oracles)
+    except Halted as exc:
+        console.print(f"[red]Close stopped:[/] {exc}")
+        raise typer.Exit(1) from exc
     except ValueError as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
@@ -296,6 +299,10 @@ def approve(run_id: str, by: str = typer.Option(None, help="Approver name (defau
     run = store.run(run_id)
     if not run or run["status"] != "proposed":
         console.print(f"[red]Run {run_id} is not awaiting approval[/] (status: {run and run['status']}).")
+        raise typer.Exit(1)
+    if settled := store.approved_run(run["repo"], run["period"]):
+        console.print(f"[red]Refusing: {run['repo']} {run['period']} was already settled by approved run "
+                      f"{settled}.[/]")
         raise typer.Exit(1)
     run_dir = settings.state_dir / "runs" / run_id
     proposal = run_dir / "ledger.proposed.jsonl"
@@ -476,7 +483,7 @@ def receipt(path: Path) -> None:
 
     from linus import sandbox
     from linus.diffcheck import DiffSignals
-    from linus.oracle import Oracle, base_run
+    from linus.oracle import FORMAT, Oracle, base_run, render
     from linus.verify import verify
 
     settings = load_settings()
