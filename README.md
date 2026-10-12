@@ -260,7 +260,8 @@ close.
   (`evals/economics.json`), with three scenarios, a pricing comparison, a cash
   simulator and risks. It recommends $49 per repo including 100 PRs, then
   $0.25 per extra PR (base case: cash-positive in August 2027, $64.7k at month
-  24 from $50k), and it corrected our own break-even figure.
+  24 from $50k), and it corrected our own break-even figure. The live model
+  (view-only, opens on the simulator): <https://cfo.ai/s/b9zDJwy8xCYUsasi>.
 - **JEV (TypeSafe).** The decision engine for every cheap judgement, following
   its guidance: one state, many atomic questions, arithmetic in code,
   confidence-gated routing.

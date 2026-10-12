@@ -6,6 +6,7 @@ from Linus's measured unit economics (`uv run linus economics`,
 billing or GitHub data was used. The model lives in cfo.ai as three pages
 (controls and simulator, operating plan, pricing and cash) with Main, Growth
 and Downside scenarios, covering October 2026 to September 2028 in USD.
+View it (read-only, opens on the simulator): <https://cfo.ai/s/b9zDJwy8xCYUsasi>.
 
 Ari's first finding corrected our own projection: at the assumed real-repo
 cost of $0.0136 per PR, a flat $49 per repo breaks even at about 3,600 PRs a
