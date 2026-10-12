@@ -137,6 +137,14 @@ Measured on v4 cold runs (11 PRs), where every oracle is generated from scratch:
 Agent time: about 25 seconds for the whole month. Re-running a month reuses the
 oracles (one per issue), so it costs only the JEV calls.
 
+`uv run linus economics` recomputes these numbers from every eval result and
+stored run (JEV and OpenAI separately, agent seconds and sandbox runs per PR,
+how many cold runs they come from) and projects them to 100, 1,000 and 10,000
+PRs a month. The projection's inputs are assumptions you pass in and are
+labelled as such: `--price-per-repo` (default $49 a month),
+`--sandbox-usd-per-pr` (default $0.005) and `--real-repo-multiplier` (default
+10x the demo's model cost, since real diffs and issues are bigger).
+
 ## Quickstart
 
 Needs Python 3.10+, [uv](https://docs.astral.sh/uv/), Docker, and API keys for
@@ -159,9 +167,51 @@ Every command runs through `uv run` (or activate `.venv` first):
 | `uv run linus receipt <file>` | Re-runs a receipt's sandbox proof, no LLM calls, and compares |
 | `uv run linus approve <run>` | Appends a proposed run to the hash-chained ledger |
 | `uv run linus ledger` | Verifies every hash in the ledger |
+| `uv run linus demo --publish OWNER/REPO` | Publishes the demo month as a public GitHub repo with real PRs |
+| `uv run linus close --github OWNER/REPO` | Runs the close on a GitHub repo's PRs (`--period YYYY-MM`, default this UTC month) |
+| `uv run linus close --github OWNER/REPO --comment` | Same, then posts every verdict on its PR, labels it, and updates a "Bounty close" issue |
+| `uv run linus eval --github OWNER/REPO --demo-authors` | Cold run on the published demo, scored against ground truth |
+| `uv run linus economics` | Measured cost per run and per PR, plus projections; writes `economics.json` and `economics.csv` |
 
 Rules for the pool live in [`bounty.yml`](bounty.yml): budget per currency,
 point table, cap, minimum payout, duplicate threshold, excluded authors.
+
+## On GitHub
+
+Linus reads a real repository with `--github OWNER/REPO`. It only reads unless
+you pass `--comment`: issues with a bounty label and the month's PRs come from
+the REST API, and the code from a clone in `.linus/github/` that also fetches
+every PR's head (`refs/pull/*/head`), so PRs from forks work. Without
+`--github` everything runs on the local demo month as before.
+
+The demo month can be published as a live public repo:
+
+```bash
+uv run linus demo --publish OWNER/REPO                         # repo, labels, 5 issues, 13 PRs
+uv run linus close --github OWNER/REPO --demo-authors --comment
+uv run linus approve <run>                                     # also marks the close issue approved
+```
+
+`--publish` creates the repo under your account if it doesn't exist, pushes
+`main` (with a README explaining the demo) and every PR branch with your own
+git credentials, creates the `bounty` and `linus: pay|reject|flag` labels,
+opens the 5 issues in order and the 13 PRs in their original order. Running it
+again skips everything that already exists; it refuses to overwrite a `main`
+that differs from the demo's unless you pass `--force`. All 13 PRs are opened
+by your account, so `--demo-authors` takes each contributor's name from the
+head commit's author instead (on a real repo, leave it off: commit authors are
+whatever the contributor typed). Anyone can open a PR against a bounty issue to
+try to fool it; it is judged at the next close.
+
+With `--comment`, after the close has finished (proposed or halted), each PR
+gets one comment that is updated on later runs: the verdict and reason, the
+evidence (reproduction test on base and on the PR, the suite result, JEV
+signals with probabilities, deleted tests or harness edits), points and
+proposed payout, the receipt hash, run id and neatlogs trace id. Each PR gets
+exactly one `linus:` label, and one "Bounty close YYYY-MM" issue carries the
+leaderboard, every verdict, the invariants and the model cost per PR. GitHub
+writes happen after the close, never inside it, and GitHub errors are logged
+and skipped, so an outage can't break or change a close.
 
 ## Evidence for the hackathon tools
 
@@ -176,7 +226,8 @@ point table, cap, minimum payout, duplicate threshold, excluded authors.
   for coding sessions run inside the repo, from October 12; see them with
   `entire checkpoint list`.
 - **cfo.ai.** Business plan in progress, built from the measured cost per PR
-  above (inputs in [`hackathon.md`](hackathon.md)).
+  above (inputs in [`hackathon.md`](hackathon.md); `uv run linus economics`
+  exports them as `economics.json` and `economics.csv`).
 - **JEV (TypeSafe).** The decision engine for every cheap judgement, following
   its guidance: one state, many atomic questions, arithmetic in code,
   confidence-gated routing.
@@ -186,8 +237,8 @@ point table, cap, minimum payout, duplicate threshold, excluded authors.
 - The demo month is small and self-made; real repositories are messier.
 - The sandbox runs Python projects with pytest. Other ecosystems need their own
   runners.
-- PRs are read from a local git repo plus a fixture file. A read-only GitHub
-  source is next.
+- On GitHub, Linus runs when the maintainer runs a close; it doesn't react to
+  new PRs as they arrive.
 - Linus proposes payouts; it doesn't move money.
 
 Built during [neatHack](https://neatlogs.com/hackathon), October 2026.

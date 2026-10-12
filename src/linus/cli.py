@@ -5,13 +5,13 @@ import getpass
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
 import typer
 from neatlogs import span
 from rich.console import Console
@@ -19,13 +19,14 @@ from rich.table import Table
 from typesafe_sdk import Noul
 
 from linus import demo as demo_mod
-from linus import evals, ledger, report
+from linus import economics, evals, github_report, ledger, publish, report
 from linus.close import Close
 from linus.config import Settings, load_settings
+from linus.github import GitHub, GitHubError
 from linus.jev import Jev
 from linus.llm import Generator
 from linus.policy import load as load_policy
-from linus.source import LocalSource
+from linus.source import GitHubSource, LocalSource
 from linus.store import Store
 from linus.tracing import init_tracing, shutdown_tracing
 
@@ -77,11 +78,7 @@ def _ping_openai(settings: Settings) -> str:
 
 
 def _ping_github(settings: Settings) -> str:
-    headers = {"Accept": "application/vnd.github+json"}
-    if settings.github_token:
-        headers["Authorization"] = f"Bearer {settings.github_token}"
-    resp = httpx.get(f"https://api.github.com/repos/{settings.target_repo}", headers=headers, timeout=15)
-    resp.raise_for_status()
+    resp = GitHub(settings.github_token).request("GET", f"/repos/{settings.target_repo}")
     remaining = resp.headers.get("x-ratelimit-remaining", "?")
     return f"{resp.json()['full_name']} reachable, {remaining} API calls left this hour"
 
@@ -146,7 +143,20 @@ def _demo_root(settings: Settings) -> Path:
     return settings.state_dir / "demo"
 
 
-def _source(settings: Settings) -> LocalSource:
+def _source(settings: Settings, github: str | None = None, period: str | None = None,
+            demo_authors: bool = False) -> LocalSource:
+    """The demo month on disk, or with `github` (OWNER/REPO) that repo's PRs for `period`."""
+    if github:
+        period = period or f"{datetime.now(timezone.utc):%Y-%m}"
+        if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", period):
+            console.print(f"[red]--period {period!r} is not a month; expected YYYY-MM.[/]")
+            raise typer.Exit(1)
+        try:
+            return GitHubSource(github, settings, period, demo_authors,
+                                issue_labels=load_policy(Path("bounty.yml")).issue_labels)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/]")
+            raise typer.Exit(1) from exc
     root = _demo_root(settings)
     if not (root / "fixture.json").exists():
         console.print("[yellow]No demo month yet, building it.[/]")
@@ -154,7 +164,7 @@ def _source(settings: Settings) -> LocalSource:
     return LocalSource(root)
 
 
-def _run_close(settings: Settings, run_id: str | None, crash_after: int | None,
+def _run_close(settings: Settings, source: LocalSource, run_id: str | None, crash_after: int | None,
                reuse_oracles: bool = True) -> dict:
     problems = settings.problems()
     if problems:
@@ -165,7 +175,7 @@ def _run_close(settings: Settings, run_id: str | None, crash_after: int | None,
     else:
         console.print("[yellow]NEATLOGS_API_KEY not set: running without tracing.[/]")
     try:
-        close_run = Close(settings, _source(settings), load_policy(Path("bounty.yml")),
+        close_run = Close(settings, source, load_policy(Path("bounty.yml")),
                           report.ConsoleUI(console), run_id=run_id, crash_after=crash_after,
                           reuse_oracles=reuse_oracles)
         summary = close_run.run()
@@ -176,11 +186,37 @@ def _run_close(settings: Settings, run_id: str | None, crash_after: int | None,
     return summary
 
 
+def _github(settings: Settings, why: str) -> GitHub:
+    if not settings.github_token:
+        console.print(f"[red]GITHUB_TOKEN is not set[/]; {why} needs a token with `repo` scope.")
+        raise typer.Exit(1)
+    return GitHub(settings.github_token)
+
+
 @app.command()
-def demo(force: bool = typer.Option(True, help="Rebuild if it already exists.")) -> None:
+def demo(
+    force: bool = typer.Option(None, "--force/--no-force", show_default=False,
+                               help="Rebuild if it already exists (on by default). With --publish: "
+                                    "overwrite a remote main that differs from the demo's."),
+    publish_to: str = typer.Option(None, "--publish", metavar="OWNER/REPO",
+                                   help="Publish the demo month as a public GitHub repo with real PRs."),
+) -> None:
     """Build the demo bounty month: a library, 5 issues, 13 PRs (8 of them attacks)."""
     settings = load_settings()
-    root = demo_mod.build(_demo_root(settings), force=force)
+    if publish_to:
+        gh = _github(settings, "--publish")
+        root = _demo_root(settings)
+        if not (root / "fixture.json").exists():
+            demo_mod.build(root, force=True)  # deterministic, so the commits match any earlier publish
+        try:
+            publish.publish(root, publish_to, gh, force=bool(force), log=lambda msg: console.print(f"  {msg}"))
+        except (publish.PublishError, GitHubError, ValueError) as exc:
+            console.print(f"[red]Publish failed:[/] {exc}")
+            raise typer.Exit(1) from exc
+        console.print(f"[green]Published[/] https://github.com/{publish_to}. Run the close on it with "
+                      f"[bold]uv run linus close --github {publish_to} --demo-authors --comment[/].")
+        return
+    root = demo_mod.build(_demo_root(settings), force=True if force is None else force)
     fixture = json.loads((root / "fixture.json").read_text())
     table = Table("PR", "author", "title", title=f"{fixture['repo']} · {fixture['period']}")
     for pr in fixture["pulls"]:
@@ -190,25 +226,65 @@ def demo(force: bool = typer.Option(True, help="Rebuild if it already exists."))
                   "CI is green on every PR. Run [bold]uv run linus close[/].")
 
 
+GITHUB_OPT = typer.Option(None, "--github", metavar="OWNER/REPO", help="Read PRs from this GitHub repo "
+                                                                       "instead of the local demo month.")
+PERIOD_OPT = typer.Option(None, help="Month to close with --github, YYYY-MM (default: this UTC month).")
+DEMO_AUTHORS_OPT = typer.Option(False, "--demo-authors", help="With --github: the contributor is the head "
+                                "commit's author, not the account that opened the PR (for the published demo).")
+
+
+def _run_source_close(settings: Settings, source: LocalSource, run_id: str | None, crash_after: int | None,
+                      reuse_oracles: bool = True) -> dict:
+    try:
+        return _run_close(settings, source, run_id, crash_after, reuse_oracles)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+    except (GitHubError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", "") or ""
+        console.print(f"[red]Could not read {source.name}:[/] {exc} {detail.strip()[:300]}")
+        raise typer.Exit(1) from exc
+
+
+def _report_to_github(settings: Settings, gh: GitHub, summary: dict) -> None:
+    """After the close, never inside it: GitHub errors are printed and skipped."""
+    items = Store(settings.state_dir / "linus.db").items(summary["run_id"])
+    try:
+        errors = github_report.report(gh, summary, items, log=lambda msg: console.print(f"  {msg}"))
+    except Exception as exc:  # noqa: BLE001 - reporting must never fail a finished close
+        errors = [f"{type(exc).__name__}: {exc}"]
+        console.print(f"  GitHub report failed: {errors[0]}")
+    if errors:
+        console.print(f"[yellow]{len(errors)} GitHub update(s) failed and were skipped;[/] the close "
+                      "itself, its receipts and the proposed ledger are unaffected.")
+
+
 @app.command()
 def close(
     resume: str = typer.Option(None, help="Run id to resume; 'latest' picks the last unfinished run."),
     crash_after: int = typer.Option(None, hidden=True, help="Fault injection: hard-exit after N PRs."),
+    github: str = GITHUB_OPT,
+    period: str = PERIOD_OPT,
+    demo_authors: bool = DEMO_AUTHORS_OPT,
+    comment: bool = typer.Option(False, "--comment", help="With --github: post each verdict on its PR, label "
+                                 "it, and update a 'Bounty close <period>' issue."),
 ) -> None:
     """Run the month-end close and propose a ledger."""
     settings = load_settings()
+    if comment and not github:
+        console.print("[red]--comment needs --github OWNER/REPO.[/]")
+        raise typer.Exit(1)
+    gh = _github(settings, "--comment") if comment else None
+    source = _source(settings, github, period, demo_authors)
     run_id = resume
     if resume == "latest":
-        source = _source(settings)
         run_id = Store(settings.state_dir / "linus.db").latest_unfinished(source.name, source.period)
         if not run_id:
             console.print("Nothing to resume.")
             raise typer.Exit(0)
-    try:
-        summary = _run_close(settings, run_id, crash_after)
-    except ValueError as exc:
-        console.print(f"[red]{exc}[/]")
-        raise typer.Exit(1) from exc
+    summary = _run_source_close(settings, source, run_id, crash_after)
+    if gh:
+        _report_to_github(settings, gh, summary)
     raise typer.Exit(0 if summary["status"] == "proposed" else 1)
 
 
@@ -240,9 +316,28 @@ def approve(run_id: str, by: str = typer.Option(None, help="Approver name (defau
                 "approved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "proposal_sha256": hashlib.sha256(raw).hexdigest()}
     written = ledger.append(path, entries + [approval])
-    store.finish_run(run_id, "approved", json.loads(run["summary"]))
+    summary = json.loads(run["summary"])
+    store.finish_run(run_id, "approved", summary)
     console.print(f"[green]Approved.[/] {len(written)} entries appended to {path} "
                   f"(head {written[-1]['hash'][:12]}).")
+    if summary.get("source") == "github":
+        _mark_approved_on_github(settings, store, summary, written[-1])
+
+
+def _mark_approved_on_github(settings: Settings, store: Store, summary: dict, approval: dict) -> None:
+    """Update the run's "Bounty close" issue, if --comment created one. The approval
+    is already in the ledger, so a GitHub failure here is only reported."""
+    if not settings.github_token:
+        console.print("[yellow]GITHUB_TOKEN not set: the close issue on GitHub was not updated.[/]")
+        return
+    try:
+        url = github_report.upsert_close_issue(GitHub(settings.github_token), summary,
+                                               store.items(summary["run_id"]), approval, create=False)
+    except GitHubError as exc:
+        console.print(f"[yellow]Could not update the close issue on GitHub:[/] {exc}")
+        return
+    console.print(f"  GitHub: close issue updated, {url}" if url else
+                  "  GitHub: no close issue for this run (it was closed without --comment).")
 
 
 @app.command("ledger")
@@ -271,6 +366,11 @@ def ledger_cmd() -> None:
 def eval_cmd(
     label: str = typer.Option("", help="Name for this run on the scorecard, e.g. v1."),
     run: str = typer.Option(None, help="Score an existing finished run instead of starting a fresh one."),
+    github: str = typer.Option(None, "--github", metavar="OWNER/REPO",
+                               help="Run on the published demo repo; PRs are matched to ground truth by "
+                                    "head branch pr/<n>."),
+    period: str = PERIOD_OPT,
+    demo_authors: bool = DEMO_AUTHORS_OPT,
 ) -> None:
     """Run a fresh close on the demo month and score it against ground truth."""
     settings = load_settings()
@@ -281,9 +381,19 @@ def eval_cmd(
             raise typer.Exit(1)
         summary = json.loads(stored["summary"])
     else:
-        summary = _run_close(settings, None, None, reuse_oracles=False)
-    expected = json.loads((_demo_root(settings) / "expected.json").read_text())
+        source = _source(settings, github, period, demo_authors)
+        summary = _run_source_close(settings, source, None, None, reuse_oracles=False)
+    expected_path = _demo_root(settings) / "expected.json"
+    if not expected_path.exists():
+        demo_mod.build(_demo_root(settings), force=True)
+    expected = json.loads(expected_path.read_text())
+    if github or summary.get("source") == "github":
+        expected = evals.by_branch(expected, summary)
+        if not expected:
+            console.print("[red]No PRs on demo branches (pr/<n>) in this run; nothing to score.[/]")
+            raise typer.Exit(1)
     result = evals.score(summary, expected)
+    result["cold"] = summary.get("cold", not run)
     path = evals.save(result, label, Path("evals"))
     table = Table("PR", "author", "expected", "got", "", title="Eval vs ground truth")
     for row in result["rows"]:
@@ -305,6 +415,60 @@ def runs() -> None:
     console.print(table)
 
 
+def _num(value, fmt: str) -> str:
+    return "-" if value is None else format(value, fmt)
+
+
+@app.command("economics")
+def economics_cmd(
+    price_per_repo: float = typer.Option(49.0, help="ASSUMED price per repo per month, USD."),
+    sandbox_usd_per_pr: float = typer.Option(0.005, help="ASSUMED sandbox compute cost per PR, USD."),
+    real_repo_multiplier: float = typer.Option(10.0, help="ASSUMED model cost on a real repo, as a multiple "
+                                               "of the measured demo cost (bigger diffs and issues)."),
+) -> None:
+    """Unit economics for the business plan: measured costs, plus projections. Writes
+    economics.json and economics.csv in the current directory."""
+    settings = load_settings()
+    db = settings.state_dir / "linus.db"
+    result = economics.build(Path("evals"), Store(db) if db.exists() else None,
+                             price_per_repo, sandbox_usd_per_pr, real_repo_multiplier)
+    m = result["measured"]
+
+    runs = Table("run", "label", "from", "cold", "PRs", "JEV $/PR", "OpenAI $/PR", "agent s/PR",
+                 "sandbox runs/PR", title="Measured runs")
+    for r in result["runs"]:
+        runs.add_row(r["run_id"], (r["label"] or r["repo"])[:24], r["from"], {True: "yes", False: "no"}
+                     .get(r["cold"], "?"), str(r["prs"]), _num(r["jev_usd_per_pr"], ".6f"),
+                     _num(r["openai_usd_per_pr"], ".6f"), _num(r["agent_seconds_per_pr"], ".1f"),
+                     _num(r["sandbox_runs_per_pr"], ".1f"))
+    console.print(runs)
+
+    unit = Table("value", "", "basis", title="Unit costs")
+    unit.add_row("model cost per run, JEV", f"${_num(m['jev_usd_per_run'], '.6f')}", "measured")
+    unit.add_row("model cost per run, OpenAI", f"${_num(m['openai_usd_per_run'], '.6f')}", "measured")
+    unit.add_row("model cost per PR, JEV", f"${_num(m['jev_usd_per_pr'], '.6f')}", "measured")
+    unit.add_row("model cost per PR, OpenAI", f"${_num(m['openai_usd_per_pr'], '.6f')}", "measured")
+    unit.add_row("agent seconds per PR", _num(m["agent_seconds_per_pr"], ".2f"), "measured")
+    unit.add_row("sandbox runs per PR", _num(m["sandbox_runs_per_pr"], ".2f"), "measured")
+    unit.add_row("runs used", f"{m['runs_used']} ({m['cold_runs_used']} cold, {m['prs_measured']} PRs)",
+                 f"measured, {m['basis']}")
+    unit.add_row("price per repo-month", f"${price_per_repo:,.2f}", "[yellow]assumed[/]")
+    unit.add_row("sandbox cost per PR", f"${sandbox_usd_per_pr:.4f}", "[yellow]assumed[/]")
+    unit.add_row("real-repo model cost multiplier", f"{real_repo_multiplier:g}x", "[yellow]assumed[/]")
+    console.print(unit)
+
+    proj = Table("PRs/month", "model $", "sandbox $", "cost $", "$/PR", "price $", "gross margin",
+                 "agent h", "sandbox runs", title="Projection: one repo, per month (measured x assumed)")
+    for p in result["projection"]["rows"]:
+        proj.add_row(f"{p['prs_per_month']:,}", f"{p['model_usd']:,.2f}", f"{p['sandbox_usd']:,.2f}",
+                     f"{p['cost_usd']:,.2f}", f"{p['cost_per_pr_usd']:.4f}", f"{p['price_usd']:,.2f}",
+                     _num(p["gross_margin"], ".1%"), f"{p['agent_hours']:,.1f}", f"{p['sandbox_runs']:,}")
+    console.print(proj)
+    console.print(f"[dim]{result['projection']['note']}[/]")
+    json_path, csv_path = economics.write(result, Path.cwd())
+    console.print(f"wrote {json_path.name} and {csv_path.name}")
+
+
 @app.command()
 def receipt(path: Path) -> None:
     """Re-run a receipt's sandbox proof with no LLM calls and compare the outcomes."""
@@ -317,7 +481,8 @@ def receipt(path: Path) -> None:
 
     settings = load_settings()
     r = json.loads(path.read_text())
-    source = _source(settings)
+    local = _source(settings)
+    source = local if r["repo"] == local.name else _source(settings, r["repo"], r["period"])
     number = r["pr"]["number"]
     pr = next((p for p in source.pulls() if p.number == number), None)
     if r["repo"] != source.name or pr is None:

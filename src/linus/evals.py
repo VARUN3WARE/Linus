@@ -12,6 +12,18 @@ HEADER = ("| When (UTC) | Label | Accuracy | False-pay | Missed-good | Human-fla
 # Rows written before per-PR dollar cost was tracked keep the original columns.
 
 
+def by_branch(expected: dict, summary: dict) -> dict:
+    """Ground truth re-keyed to a published demo's PR numbers. GitHub numbers the
+    PRs itself, so they are matched on their head branch, pr/<demo number>.
+    PRs from anyone else have no expected verdict and are left out."""
+    out = {}
+    for number, v in summary["verdicts"].items():
+        branch = v.get("branch") or ""
+        if branch.startswith("pr/") and branch[3:] in expected:
+            out[str(number)] = expected[branch[3:]]
+    return out
+
+
 def score(summary: dict, expected: dict) -> dict:
     rows = []
     for n, exp in sorted(expected.items(), key=lambda kv: int(kv[0])):

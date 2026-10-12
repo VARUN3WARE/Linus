@@ -356,10 +356,12 @@ class Close:
         seconds = sum(i["data"].get("seconds", 0) for i in items.values())
         return {
             "run_id": self.run_id, "repo": self.source.name, "period": self.source.period, "status": status,
+            "source": getattr(self.source, "kind", "local"), "cold": not self.reuse_oracles,
             "problems": problems,
             "verdicts": {pr.number: {"author": pr.author, "verdict": items[pr.number]["verdict"],
                                      "reason": items[pr.number]["data"].get("reason"),
-                                     "points": (items[pr.number]["data"].get("points") or {}).get("points")}
+                                     "points": (items[pr.number]["data"].get("points") or {}).get("points"),
+                                     "branch": pr.branch}
                          for pr in pulls},
             "allocations": [{"currency": a.currency, "budget": a.budget_cents / 100,
                              "payouts": {c: v / 100 for c, v in a.payouts.items()},
@@ -384,9 +386,9 @@ class Close:
             if existing["status"] != "running":
                 # A finished run's status (proposed, halted, approved) must never be overwritten.
                 raise ValueError(f"run {self.run_id} is {existing['status']}; only unfinished runs can be resumed")
-        else:
+        pulls = self.source.pulls()  # before the run exists: a source that can't be read leaves no empty run
+        if not self.resumed:
             self.store.create_run(self.run_id, self.source.name, self.source.period)
-        pulls = self.source.pulls()
         with step("month_end_close", kind="WORKFLOW", run_id=self.run_id, repo=self.source.name,
                   period=self.source.period, prs=len(pulls), resumed=self.resumed) as root:
             self.trace_id = trace_id_of(root)

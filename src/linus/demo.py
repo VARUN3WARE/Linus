@@ -406,10 +406,10 @@ def _apply(files: dict[str, str], edits) -> dict[str, str]:
     return out
 
 
-def _git(repo: Path, *args: str, env: dict | None = None) -> str:
+def _git(repo: Path, *args: str, env: dict | None = None, input: str | None = None) -> str:
     result = subprocess.run(
         ["git", *args], cwd=repo, capture_output=True, text=True, check=True,
-        env={**os.environ, **(env or {})},
+        env={**os.environ, **(env or {})}, input=input,
     )
     return result.stdout.strip()
 
@@ -421,14 +421,82 @@ def _write(repo: Path, files: dict[str, str]) -> None:
         target.write_text(content)
 
 
-def _commit(repo: Path, author: str, when: str, message: str) -> None:
+def _identity(author: str, when: str) -> dict:
     email = f"{author}@users.noreply.example.com"
-    env = {
+    return {
         "GIT_AUTHOR_NAME": author, "GIT_AUTHOR_EMAIL": email, "GIT_AUTHOR_DATE": when,
         "GIT_COMMITTER_NAME": author, "GIT_COMMITTER_EMAIL": email, "GIT_COMMITTER_DATE": when,
     }
+
+
+def _commit(repo: Path, author: str, when: str, message: str) -> None:
     _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", message, env=env)
+    _git(repo, "commit", "-q", "-m", message, env=_identity(author, when))
+
+
+def published_readme(repo: str) -> str:
+    """README.md for main of the published demo repo `repo` (OWNER/REPO)."""
+    return f'''# textkit: a live demo of Linus
+
+textkit is a small Python library of text and list helpers: `chunk`,
+`slugify`, `parse_duration`, `word_count` and `truncate`. It is small on
+purpose. It exists to be the subject of this demo.
+
+This repository is a live demo of [Linus](https://github.com/VARUN3WARE/Linus),
+an agent that runs the month-end close for an open-source bounty pool. It
+verifies every pull request with evidence it can reproduce, rejects what it
+can't prove, and proposes a payout ledger that a maintainer approves.
+
+## How the demo works
+
+- [Issues labelled `bounty`](https://github.com/{repo}/issues?q=label%3Abounty) are paid from a
+  monthly pool.
+- The {len(PULLS)} pull requests opened by the maintainer account are simulated
+  contributors; the contributor names come from the commit authors.
+  {sum(v == "pay" for v, _ in EXPECTED.values())} are honest fixes. The others are attacks bounty programs
+  actually see: a fix hard-coded to the issue's example, prompt injection
+  aimed at AI reviewers, a "fix" that deletes the test it breaks, a copy of
+  another PR, a conftest that forces a green test run, and more.
+- At the close, Linus comments on every PR with its verdict and the evidence
+  behind it, labels it `linus: pay`, `linus: reject` or `linus: flag`, and
+  posts a "Bounty close" issue with the leaderboard.
+
+## Try to fool the bot
+
+Anyone may [open a pull request](https://github.com/{repo}/compare) against a
+bounty issue (say `Fixes #N` in the description). Linus runs it in a sandbox
+with no network and posts its verdict on the PR at the next close.
+Wrong fixes, hard-coded answers, deleted tests, forged test runs and notes to
+AI reviewers are all fair game.
+
+No real money is paid in this demo.
+
+## Using textkit
+
+```python
+from textkit import chunk, parse_duration, slugify
+
+chunk([1, 2, 3, 4], 2)          # [[1, 2], [3, 4]]
+slugify("hello")                # "hello"
+parse_duration("1h30m")         # 3600
+```
+
+Some of this doesn't work yet; that's what the bounty issues are for.
+'''
+
+
+def readme_commit(repo_dir: Path, repo: str) -> str:
+    """A commit on top of main that swaps in published_readme(). Built with
+    plumbing, so the local main that `linus close` reads stays as it is, and
+    with a fixed identity and date, so publishing twice gives the same sha."""
+    blob = _git(repo_dir, "hash-object", "-w", "--stdin", input=published_readme(repo))
+    entries = []
+    for line in _git(repo_dir, "ls-tree", "main").splitlines():
+        meta, path = line.split("\t", 1)
+        entries.append(f"100644 blob {blob}\tREADME.md" if path == "README.md" else line)
+    tree = _git(repo_dir, "mktree", input="\n".join(entries) + "\n")
+    return _git(repo_dir, "commit-tree", tree, "-p", "main", "-m", "README: this repo is a live demo of Linus",
+                env=_identity("maintainer", "2026-08-28T09:30:00Z"))
 
 
 def build(root: Path, force: bool = False) -> Path:

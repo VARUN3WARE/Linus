@@ -78,6 +78,28 @@ def test_finished_runs_cannot_be_resumed(tmp_path, monkeypatch):
     assert resumed.store.run(close.run_id)["status"] == "proposed"
 
 
+def test_summary_records_the_source_and_each_prs_branch(tmp_path, monkeypatch):
+    close = _close(tmp_path, monkeypatch, [_pr(1)])
+    close.source.kind = "github"
+    close.source._pulls = [PullRequest(**{**asdict(_pr(1)), "branch": "pr/101"})]
+    monkeypatch.setattr(close, "_gate", lambda pr, issue, data: ("reject", "no"))
+    summary = close.run()
+    assert summary["source"] == "github" and summary["cold"] is False
+    assert summary["verdicts"][1]["branch"] == "pr/101"
+
+
+def test_a_source_that_cannot_be_read_leaves_no_run(tmp_path, monkeypatch):
+    close = _close(tmp_path, monkeypatch)
+
+    def down():
+        raise ConnectionError("github is down")
+
+    close.source.pulls = down
+    with pytest.raises(ConnectionError):
+        close.run()
+    assert close.store.runs() == []
+
+
 def test_run_ids_started_together_differ(tmp_path, monkeypatch):
     assert _close(tmp_path, monkeypatch).run_id != _close(tmp_path, monkeypatch).run_id
 
