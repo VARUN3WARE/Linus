@@ -34,7 +34,7 @@ writes a tamper-evident ledger for the maintainer to approve.
 |---|---|---|
 | neatlogs | One trace per close: workflow span, agent span per PR, JEV calls as LLM spans with tokens and cost, auto-captured OpenAI calls, sandbox runs as tool spans, anti-gaming and invariant guardrails | Workflow `linus`. Before/after pairs: v4 paying two forgeries `b810aeed4d1619f5140600f600284d89` → v5 `c7560a80a11201b97d01923f5fe9bb57`; v5's sandbox certifying #116 `e67b7aaaf8a3921d2a772faaa3629c73` → v6 `3952c9122cbadec1de92d2447b270a9f`. Live GitHub v6 close `dcf6aab1eeeb52ffa00bbc41e8684924`. _Add dashboard screenshots._ |
 | Entire | Enabled for the coding agent in this repo (`.entire/`, agent hooks) with PII (email/phone) redaction on | Every code commit from Oct 12 has an `Entire-Checkpoint` trailer; 7 checkpoints are pushed to GitHub (`refs/entire/checkpoints/...`, `entire checkpoint list`). The Oct 11 session ran with the parent folder as its working directory, so the repo's hooks never loaded and it has none. |
-| cfo.ai | Pricing, cost per verified PR, margins, runway | Measured inputs: `evals/economics.json` / `evals/economics.csv` (`uv run linus economics`). _Business plan link pending._ |
+| cfo.ai | Pricing, cost per verified PR, margins, runway | [`BUSINESS_PLAN.md`](BUSINESS_PLAN.md): 24-month model built in cfo.ai by Ari from `evals/economics.json` (Main/Growth/Downside, pricing comparison, cash simulator, risks). Ari corrected our break-even from ~10,000 to ~3,600 PRs/repo/month. _Share link: pending._ |
 | JEV | Gates, oracle audit, scoring levels | Every receipt records JEV's answers and model version (`jev-1.13.0`) |
 
 ## Build log
@@ -106,6 +106,10 @@ writes a tamper-evident ledger for the maintainer to approve.
   evals can never be approved. The headless session doing v6 ran out of credit midway; it was
   finished from a session outside the repo. 100% / 0% / 0% on all 16 PRs
   (trace `3952c912...`), and on the live repo.
+- **cfo.ai:** Ari (cfo.ai's AI CFO) built a 24-month model from `linus economics`: recommends
+  $49/repo including 100 PRs then $0.25/PR; base case cash-positive Aug 2027, $64.7k at month
+  24 from $50k; it caught that flat pricing breaks even near 3,600 PRs/month, not 10,000.
+  Written up in BUSINESS_PLAN.md.
 
 ## Eval scorecard
 
@@ -168,7 +172,7 @@ Assumptions to model (not measured yet):
 - [x] Public repo with hackathon-period commits
 - [ ] neatlogs traces: before and after screenshots
 - [x] Entire checkpoints attached to commits
-- [ ] cfo.ai business plan included
+- [x] cfo.ai business plan included (BUSINESS_PLAN.md)
 - [x] Failure recovery shown in a real run (v1 crash, resumed from checkpoints)
 - [x] Live demo on GitHub with real PRs and posted verdicts
 - [x] Before/after evidence for two rounds of attacks (eval rows + trace ids)

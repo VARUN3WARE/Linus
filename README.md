@@ -248,9 +248,12 @@ close.
   linking it to the coding-agent session that wrote it, and the checkpoints
   are pushed with the repo (`entire checkpoint list`, `entire checkpoint
   explain <id>`). Commits that only record eval results have none.
-- **cfo.ai.** Business plan in progress, built from the measured unit
-  economics above (`evals/economics.json`, inputs in
-  [`hackathon.md`](hackathon.md)).
+- **cfo.ai.** [`BUSINESS_PLAN.md`](BUSINESS_PLAN.md): a 24-month model built in
+  cfo.ai by its AI CFO from Linus's measured unit economics
+  (`evals/economics.json`), with three scenarios, a pricing comparison, a cash
+  simulator and risks. It recommends $49 per repo including 100 PRs, then
+  $0.25 per extra PR (base case: cash-positive in August 2027, $64.7k at month
+  24 from $50k), and it corrected our own break-even figure.
 - **JEV (TypeSafe).** The decision engine for every cheap judgement, following
   its guidance: one state, many atomic questions, arithmetic in code,
   confidence-gated routing.
