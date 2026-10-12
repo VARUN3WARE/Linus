@@ -146,7 +146,7 @@ def _judge_with(tmp_path, monkeypatch, signals: DiffSignals, outcome="verified")
     close.source.issues = {1: types.SimpleNamespace(number=1, labels=("bounty",))}
     oracle = Oracle(issue=1, valid=True, test_code="def test_a():\n    pass\n", test_sha256="abc")
     monkeypatch.setattr(close, "_oracle", lambda *a: oracle)
-    monkeypatch.setattr(close_mod.verify_mod, "verify", lambda *a: Verification(outcome, "fails on base", [{}]))
+    monkeypatch.setattr(close_mod.verify_mod, "verify", lambda *a: Verification(outcome, "fails on base", [{"passed": 0, "failed": 1}]))
     data = {"signals": asdict(signals), "issue": 1}
     return close._judge(_pr(1), data, "gated"), data
 
@@ -156,6 +156,21 @@ def test_verified_pr_that_edits_the_harness_goes_to_a_human(tmp_path, monkeypatc
                           harness_files=["tests/conftest.py"])
     (verdict, reason), _ = _judge_with(tmp_path, monkeypatch, signals)
     assert verdict == "flag" and "test harness" in reason
+
+
+@pytest.mark.parametrize("outcome", ["verified", "not_fixed"])
+def test_pr_that_changes_dependencies_goes_to_a_human(tmp_path, monkeypatch, outcome):
+    signals = DiffSignals(code_files=["textkit/core.py"], other_files=["requirements.txt"],
+                          dependency_files=["requirements.txt"])
+    (verdict, reason), _ = _judge_with(tmp_path, monkeypatch, signals, outcome)
+    assert verdict == "flag" and "changes dependencies (requirements.txt)" in reason
+
+
+def test_tampering_with_dependency_changes_is_still_rejected(tmp_path, monkeypatch):
+    signals = DiffSignals(code_files=["textkit/core.py"], dependency_files=["requirements.txt"],
+                          removed_tests=["test_x"])
+    (verdict, _), _ = _judge_with(tmp_path, monkeypatch, signals, "tampering")
+    assert verdict == "reject"
 
 
 def test_oracle_is_frozen_into_the_item(tmp_path, monkeypatch):

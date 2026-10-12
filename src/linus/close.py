@@ -212,6 +212,13 @@ class Close:
             verdict = "flag"
             reason = (f"evidence conflicts: {result.reason}, but every cheap signal says this fully "
                       f"fixes #{issue.number}; a human should check the failing case")
+        elif signals.changes_dependencies and result.outcome in ("verified", "not_fixed", "regression"):
+            # Its new packages aren't in the sandbox, so a failure may only mean a
+            # missing import; and adding dependencies is the maintainer's call.
+            verdict = "flag"
+            reason = (f"{result.reason}, but the PR changes dependencies "
+                      f"({', '.join(signals.dependency_files)}); the sandbox only has the default branch's, "
+                      f"so a human should check them")
         elif verdict == "reject":
             reason += corroboration(answers, signals)
         elif verdict == "pay" and signals.touches_test_harness:
@@ -386,6 +393,7 @@ class Close:
             "run_id": self.run_id, "repo": self.source.name, "period": self.source.period, "status": status,
             "source": getattr(self.source, "kind", "local"), "cold": not self.reuse_oracles,
             "oracle_format": oracle_mod.FORMAT,
+            "policy": {"origin": self.policy.origin, "sha256": self.policy.sha256},
             "problems": problems,
             "verdicts": {pr.number: {"author": pr.author, "verdict": items[pr.number]["verdict"],
                                      "reason": items[pr.number]["data"].get("reason"),

@@ -28,7 +28,9 @@ from pathlib import Path
 
 from linus.tracing import annotate, step
 
-IMAGE = "linus-sandbox"
+BASE_IMAGE = "linus-sandbox"
+IMAGE = BASE_IMAGE  # the image runs use; use_repo_image() switches to a repo's own
+REPO_LABEL = "linus.repo"
 TIMEOUT_S = 120
 CASE_TIMEOUT_S = 10  # per oracle call, each in its own interpreter
 SUMMARY = re.compile(r"(\d+) (passed|failed|errors?|skipped|xfailed|xpassed)")
@@ -170,6 +172,29 @@ class CallsRun:
     duration_s: float
     output_tail: str
     problem: str = ""
+
+
+def repo_image(repo: str) -> str:
+    """The tag of a repo's own image (the base plus its dependencies, see repos.py)."""
+    return "linus-sandbox-" + re.sub(r"[^a-z0-9]+", "-", repo.lower()).strip("-")
+
+
+def use_repo_image(repo: str | None) -> str:
+    """Run in the repo's own image if `linus init` built one for this exact repo,
+    otherwise in the base image. Returns the image chosen."""
+    global IMAGE
+    IMAGE = BASE_IMAGE
+    if repo:
+        tag = repo_image(repo)
+        try:
+            out = subprocess.run(["docker", "image", "inspect", tag, "--format",
+                                  "{{index .Config.Labels \"" + REPO_LABEL + "\"}}"],
+                                 capture_output=True, text=True)
+        except FileNotFoundError:
+            return IMAGE
+        if out.returncode == 0 and out.stdout.strip() == repo:
+            IMAGE = tag
+    return IMAGE
 
 
 def image_id() -> str:

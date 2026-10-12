@@ -91,3 +91,12 @@ def test_exists_is_false_only_on_404():
 def test_repo_names_are_validated(bad):
     with pytest.raises(ValueError):
         split_repo(bad)
+
+
+def test_secondary_rate_limits_are_retried_after_a_minute():
+    limited = httpx.Response(403, json={"message": "API rate limit exceeded for user ID 1."})
+    gh, seen = _client([limited, httpx.Response(200, json={"ok": True})])
+    waits = []
+    gh._sleep = waits.append
+    assert gh.get("/x") == {"ok": True}
+    assert waits == [60.0]

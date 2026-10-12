@@ -17,6 +17,7 @@ API = "https://api.github.com"
 ATTEMPTS = 3
 BACKOFF_S = 2.0  # first retry waits this long, then it doubles
 MAX_WAIT_S = 120.0  # a rate limit that resets later than this fails instead of blocking the run
+SECONDARY_WAIT_S = 60.0
 REPO = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
 
 BOUNTY_LABEL = ("bounty", "5319e7", "Paid from the monthly bounty pool")
@@ -70,6 +71,10 @@ class GitHub:
                 return max(float(reset) - time.time(), 0) + 1
             if resp.status_code == 429:
                 return BACKOFF_S * 2 ** attempt
+            if "rate limit" in _message(resp).lower():
+                # GitHub's secondary (per-user) limit, often with quota left: its
+                # guidance is to wait at least a minute before retrying.
+                return SECONDARY_WAIT_S * 2 ** attempt
         return None  # a plain 403 is a permission problem
 
     def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
@@ -87,7 +92,10 @@ class GitHub:
                 return resp
             wait = self._retry_after(resp, attempt)
             if wait is None or last or wait > MAX_WAIT_S:
-                raise GitHubError(resp.status_code, f"{method} {path}: {resp.status_code} {_message(resp)}")
+                hint = "" if wait is None else (
+                    f" (GitHub is rate-limiting these requests; try again in about {max(1, round(wait / 60))} min)")
+                raise GitHubError(resp.status_code,
+                                  f"{method} {path}: {resp.status_code} {_message(resp)}{hint}")
             self._sleep(wait)
         raise AssertionError("unreachable")
 

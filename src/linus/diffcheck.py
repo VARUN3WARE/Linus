@@ -9,6 +9,12 @@ from linus.source import FileChange
 
 TEST_PATH = re.compile(r"(^|/)(tests?/|test_[^/]*\.py$|[^/]*_test\.py$|conftest\.py$)")
 DOC_PATH = re.compile(r"(\.(md|rst|txt)$)|(^|/)docs?/")
+# Files that declare what gets installed. The sandbox only has the default
+# branch's dependencies, and new dependencies are a supply-chain decision, so
+# a PR that changes these goes to a human. Not docs, even when they end in .txt.
+DEPENDENCY_FILE = re.compile(r"(^|/)(requirements[^/]*\.(txt|in)|requirements/[^/]+\.(txt|in)|pyproject\.toml"
+                             r"|setup\.py|setup\.cfg|Pipfile(\.lock)?|poetry\.lock|uv\.lock|pdm\.lock"
+                             r"|constraints[^/]*\.txt)$")
 TEST_DEF = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)")
 SKIP_MARKER = re.compile(r"pytest\.mark\.(skip|xfail)|pytest\.skip\(|unittest\.skip|@skip\b")
 INJECTION = re.compile(
@@ -71,6 +77,7 @@ class DiffSignals:
     injection_hits: list[str] = field(default_factory=list)
     harness_files: list[str] = field(default_factory=list)
     outcome_hacks: list[str] = field(default_factory=list)
+    dependency_files: list[str] = field(default_factory=list)
 
     @property
     def docs_only(self) -> bool:
@@ -87,6 +94,10 @@ class DiffSignals:
         return bool(self.harness_files)
 
     @property
+    def changes_dependencies(self) -> bool:
+        return bool(self.dependency_files)
+
+    @property
     def manipulates_outcome(self) -> bool:
         return bool(self.outcome_hacks)
 
@@ -98,6 +109,8 @@ class DiffSignals:
 def _kind(path: str) -> str:
     if TEST_PATH.search(path):
         return "test"
+    if DEPENDENCY_FILE.search(path):
+        return "other"
     if DOC_PATH.search(path):
         return "doc"
     if path.endswith(".py"):
@@ -181,6 +194,8 @@ def analyze(diff: str, changes: list[FileChange], pr_text: str) -> DiffSignals:
             signals.code_lines_changed += change.added + change.removed
         if HARNESS_FILE.search(change.path):
             harness.append(change.path)
+        if DEPENDENCY_FILE.search(change.path):
+            signals.dependency_files.append(change.path)
 
     removed, added, added_text, hacks = set(), set(), [], []
     scan = _Scan()

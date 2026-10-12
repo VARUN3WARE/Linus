@@ -23,7 +23,7 @@ class ConsoleUI:
         title = "Resuming" if close.resumed else "Month-end close"
         self.c.print(Panel.fit(
             f"[bold]{close.source.name}[/]  period {close.source.period}  ·  {len(pulls)} PRs  ·  pool {budget}\n"
-            f"run [cyan]{close.run_id}[/]",
+            f"run [cyan]{close.run_id}[/]  ·  rules {close.policy.origin or 'bounty.yml'}",
             title=f"Linus · {title}", border_style="cyan"))
 
     def item(self, pr, verdict: str | None, reason: str, data: dict, resumed: bool = False,

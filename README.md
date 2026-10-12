@@ -38,6 +38,53 @@ maintainers everywhere are drowning in PRs that pass CI and fix nothing. A
 bounty program needs a reviewer that can't be talked into paying, and that
 shows its work.
 
+## Run it on your own repos
+
+For a maintainer or a startup that funds its open-source repos: put a monthly
+budget on issues, let anyone send PRs, and pay only for fixes Linus can prove.
+Setup takes about ten minutes per repo; after that it's one command a month.
+
+**You need:** Docker, [uv](https://docs.astral.sh/uv/), JEV and OpenAI keys in
+`.env`, and a GitHub token as `GITHUB_TOKEN` in `.env` (a fine-grained token for your
+repos with *Contents: read*, *Issues: read and write*, *Pull requests: read and
+write*; read-only works if you don't want Linus to post).
+
+```bash
+git clone https://github.com/VARUN3WARE/Linus && cd Linus
+cp .env.example .env && make setup          # keys, then the sandbox image
+uv run linus init acme/widgets --budget 500  # one repo: access, labels, rules, sandbox
+```
+
+`linus init` checks what your token can do, creates the `bounty` and
+`linus: pay|reject|flag` labels, writes starter rules, and builds a sandbox
+image with the repo's test dependencies (from `requirements*.txt` and
+`pyproject.toml` on the default branch, installed at build time; tests still
+run with no network). Then commit the rules to the repo as
+`.github/bounty.yml`, so contributors can read them; Linus reads that file at
+every close.
+
+**Every month:**
+
+1. Label the issues you'll pay for `bounty`, and say in each what done means.
+2. On the 1st, close the month that just ended:
+   `uv run linus close --github acme/widgets --period last --comment`.
+   Every PR gets its verdict and evidence as a comment and a label, and a
+   "Bounty close" issue shows the proposed payouts.
+3. `uv run linus status` shows every repo and what needs you: payouts to
+   approve, PRs flagged for a human (with links), unfinished closes.
+4. `uv run linus approve <run-id>` books the payouts in the ledger.
+5. `uv run linus payouts --csv payouts.csv` gives whoever pays people the
+   list: contributor, amount, PRs, approver and ledger hash. Linus never moves
+   money; pay through GitHub Sponsors, Open Collective or your bank.
+
+A cron line on any always-on machine runs step 2 for you:
+`0 9 1 * * cd ~/Linus && uv run linus close --github acme/widgets --period last --comment`.
+
+**What it supports today:** GitHub repos with Python code tested by pytest.
+Linus never auto-pays a PR that changes dependencies or edits how tests run; those go to a human.
+Under the hood a close costs under a tenth of a cent per PR in model calls
+(measured; see [Cost](#cost)).
+
 ## What a close looks like
 
 The v6 close of the live demo repo (October 12):
@@ -196,21 +243,28 @@ Every command runs through `uv run` (or activate `.venv` first):
 
 | Command | What it does |
 |---|---|
-| `uv run linus doctor` | Checks keys, JEV, OpenAI, Docker, the sandbox image, Entire |
+| `uv run linus init OWNER/REPO` | Sets a repo up: token access, labels, starter rules, a sandbox with its dependencies |
+| `uv run linus status` | Every repo's latest month, and what needs you (approvals, flagged PRs, unfinished closes) |
+| `uv run linus payouts --csv FILE` | Approved payouts for whoever sends the money |
+| `uv run linus doctor [--github OWNER/REPO]` | Checks keys, JEV, OpenAI, Docker, the sandbox image, Entire; with a repo, also access, rules and its sandbox |
 | `uv run linus demo` | Builds the demo month (library, 5 issues, 16 PR branches) |
 | `uv run linus close` | Runs the month-end close and proposes a ledger |
 | `uv run linus close --resume latest` | Resumes a crashed or halted run from its per-PR checkpoints |
 | `uv run linus eval` | Fresh cold run, scored against ground truth, appended to the scorecard (never approvable) |
 | `uv run linus receipt <file>` | Re-runs a receipt's sandbox proof, no LLM calls, and compares |
-| `uv run linus approve <run>` | Checks the proposal is unchanged and still holds the invariants, then appends it to the hash-chained ledger |
+| `uv run linus approve <run>` | Checks the proposal is unchanged and still holds the invariants, then appends it to the hash-chained ledger (`--sync-github` re-posts an approval GitHub missed) |
 | `uv run linus ledger` | Verifies every hash in the ledger |
 | `uv run linus demo --publish OWNER/REPO` | Publishes the demo month as a public GitHub repo with real PRs |
-| `uv run linus close --github OWNER/REPO --comment` | Runs the close on a GitHub repo's PRs, then posts every verdict, labels each PR, and updates a "Bounty close" issue |
+| `uv run linus close --github OWNER/REPO --period last --comment` | Runs the close on a GitHub repo's PRs for last month (`--period` takes `YYYY-MM`, `this` or `last`), then posts every verdict, labels each PR, and updates a "Bounty close" issue |
 | `uv run linus eval --github OWNER/REPO --demo-authors` | Cold run on the published demo, scored against ground truth |
 | `uv run linus economics` | Measured cost per run and per PR, plus projections; writes `economics.json` and `economics.csv` |
 
-Rules for the pool live in [`bounty.yml`](bounty.yml): budget per currency,
-point table, cap, minimum payout, duplicate threshold, excluded authors.
+Rules for a pool: budget per currency, point table, cap, minimum payout,
+duplicate threshold, excluded authors. Linus takes them from `--policy FILE`,
+else the repo's `.github/bounty.yml`, else the copy `linus init` wrote, else
+[`bounty.yml`](bounty.yml) here (the demo's rules). Each close shows which, and
+every receipt records the rules' SHA-256. A typo gets a plain error, not a
+wrong payout.
 
 ## On GitHub
 
@@ -270,8 +324,9 @@ close.
 
 - The demo month is small and self-made; real repositories are messier.
 - The sandbox runs Python projects with pytest. Other ecosystems need their own
-  runners, and projects that must be installed (`pip install -e .`) to run
-  their tests aren't supported yet.
+  runners. `linus init` installs a repo's declared dependencies, but not Poetry
+  groups or anything only `setup.py` knows, and projects that must be built
+  (compiled extensions) to run their tests aren't supported yet.
 - A red team found what it found; more attacks surely exist. Every rejection
   has a reason and every payout a receipt so a human can check.
 - On GitHub, Linus runs when the maintainer runs a close; it doesn't react to

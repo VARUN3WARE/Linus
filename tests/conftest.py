@@ -1,6 +1,7 @@
 """An in-memory GitHub REST API for httpx.MockTransport, so GitHub tests never
 touch the network."""
 
+import base64
 import json
 import re
 from urllib.parse import unquote
@@ -22,7 +23,7 @@ class FakeGitHub:
 
     def add_repo(self, full: str) -> dict:
         repo = {"full_name": full, "default_branch": "main", "labels": [], "issues": [], "comments": [],
-                "next": 1}
+                "next": 1, "files": {}, "permissions": {"push": True}}
         self.repos[full] = repo
         return repo
 
@@ -56,7 +57,15 @@ class FakeGitHub:
         if rest == "":
             if method == "PATCH":
                 repo.update(body)
-            return ok({"full_name": repo["full_name"], "default_branch": repo["default_branch"]})
+            return ok({"full_name": repo["full_name"], "default_branch": repo["default_branch"],
+                       "permissions": repo["permissions"], "private": False})
+        if m := re.match(r"^/contents/(.+)$", rest):
+            if m.group(1) not in repo["files"]:
+                return httpx.Response(404, json={"message": "Not Found"})
+            content = base64.b64encode(repo["files"][m.group(1)].encode()).decode()
+            return ok({"type": "file", "path": m.group(1), "content": content, "encoding": "base64"})
+        if re.match(r"^/git/trees/[^/]+$", rest):
+            return ok({"tree": [{"path": f, "type": "blob"} for f in sorted(repo["files"])]})
         if rest == "/labels":
             if method == "POST":
                 repo["labels"].append(body)
