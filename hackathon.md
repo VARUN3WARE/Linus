@@ -179,3 +179,8 @@ Assumptions to model (not measured yet):
 - [ ] Demo video, 3 minutes or less
 - [ ] Building-in-public posts tagged #neatHack
 - [ ] X quote post published, Oct 12, 7:00 to 11:55 PM IST
+
+## Submission
+
+- Demo video and quote post: https://x.com/varun_slops/status/2109706348275650795
+- Submitted on neatlogs.com/submission for team Humanslop, October 12, 2026.

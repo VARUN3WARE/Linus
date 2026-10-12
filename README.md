@@ -14,6 +14,8 @@ a receipt that anyone can re-run without an LLM.
 and evidence are posted on every PR, and the payout leaderboard is
 [issue #19](https://github.com/VARUN3WARE/textkit-bounty/issues/19).
 
+**Demo video:** [2-minute walkthrough on X](https://x.com/varun_slops/status/2109706348275650795).
+
 ```mermaid
 flowchart LR
     A[Month of PRs] --> B["Cheap gates<br/>JEV: 1 request per PR<br/>+ deterministic diff checks"]
