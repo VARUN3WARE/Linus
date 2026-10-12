@@ -1,0 +1,88 @@
+You are working in the Linus repository (current directory). Linus is a Python agent (src/linus) that pays
+open-source bounties only for proven work: JEV gates, an OpenAI-generated "oracle" test per issue, and a Docker
+sandbox that must show the oracle failing on the base code and passing on the PR. Read src/linus/*.py and tests/
+first.
+
+An independent audit reproduced the defects below. Fix them, add unit tests for each fix (offline, no API
+calls; tests that need Docker may use the existing `linus-sandbox` image and should be skipped if Docker is
+unavailable), run `uv run pytest -q tests`, and make ONE commit. Do not push. Do not run `linus eval` or
+`linus close` (the maintainer runs them; they cost API calls). Never add attribution or co-author lines to the
+commit message. Keep the code style of the surrounding code (small functions, short docstrings saying why).
+
+The demo month (src/linus/demo.py, rebuilt with `uv run linus demo`) now includes two attacks that exploit
+these defects: PR 112 adds a tests/conftest.py that forces pytest's exit status to 0, and PR 113 returns an int
+subclass whose __eq__ always returns True. After your changes both must be rejected, and the 6 honest PRs
+(101, 103, 106, 108, 109) must still be verified. You can check verification without API calls by building an
+Oracle by hand (see tests/ and src/linus/oracle.py: Oracle, render) for issues 4 and 5 and calling
+linus.verify.verify() on those PRs from `LocalSource(Path(".linus/demo"))`.
+
+## High
+
+1. The PR controls the sandbox verdict. `RunResult.outcome` (sandbox.py) counts exit code 0 as a pass and
+   ignores the failure count; the PR's own conftest.py, pytest config (pyproject/pytest.ini addopts) and plugins
+   run in the same pytest process. Fix with defence in depth:
+   - outcome is "pass" only if exit_code == 0 and failed == 0 and errors == 0 and passed > 0.
+   - Read counts from a JUnit XML report written to a Linus-owned writable mount (e.g. a host temp dir mounted
+     at /linus-out), and treat any disagreement between the XML counts and the stdout summary as "error"
+     (possible forgery). Keep the source mount read-only.
+   - Run the ORACLE outside the PR's tree: mount a Linus-owned dir containing the oracle file read-only (e.g. at
+     /linus-oracle), run pytest with `--noconftest`, `-p no:cacheprovider`, `-c <linus-owned ini file>` and
+     `--rootdir` pointing at the Linus dir, so the PR's conftest and pytest config don't load. Make the PR's
+     package importable with PYTHONPATH (src layout: /work/src, else /work). verify() must also require the
+     oracle run's passed count to equal the number of oracle cases.
+   - Add deterministic signals in diffcheck.py: the PR adds or edits conftest.py, pytest.ini, tox.ini,
+     setup.cfg [tool:pytest], pyproject [tool.pytest*], sitecustomize.py/usercustomize.py or *.pth files
+     ("touches_test_harness"), and added lines that manipulate test outcomes (exitstatus assignments,
+     pytest_sessionfinish/pytest_runtest_* hooks, os._exit, sys.exit inside library code, `__eq__` that
+     returns True unconditionally). Outcome-manipulation markers → reject with a clear reason; other harness
+     edits → if the sandbox verified it anyway, flag for a human instead of paying.
+2. An object whose __eq__ always returns True passes the oracle (oracle.render writes `assert call == expected`,
+   so the PR's object controls the comparison). Render a strict comparison: every case calls a helper defined in
+   the oracle file that checks the result has exactly the JSON types of the expected value, recursively
+   (type(x) is str/int/float/bool/list/dict/NoneType, no subclasses; dict keys str), and that
+   json.dumps(result, sort_keys=True) == json.dumps(expected, sort_keys=True). Expected values are JSON already
+   (cases arrive as JSON and are rendered with repr). Keep `raises` cases working.
+
+## Medium
+
+3. One malformed PR crashes the whole close, and resume crashes again on the same PR. Wrap each PR's processing in
+   close.py so any exception marks that PR done with verdict "flag" and the error text, and the run continues.
+   Make sandbox._make_readable skip symlinks (os.chmod(..., follow_symlinks=False) or lstat checks). Writing the
+   oracle into a Linus-owned dir (item 1) also removes the "tests is a file" crash.
+4. `linus approve` appends whatever is in ledger.proposed.jsonl. Store sha256 of the proposal bytes in the run
+   summary at settle time; approve must refuse if the file's hash differs, and re-check invariants on the
+   parsed entries (per currency: payouts + rollover == budget; each contributor is the author of the listed PRs
+   according to the run's receipts; each receipt hash matches the receipt file) before appending.
+5. Anti-gaming only compares paid, non-docs PRs. Compare every later PR on the same issue against all earlier PRs
+   on that issue regardless of their verdict, and docs-only PRs against earlier docs-only PRs. A later PR that
+   is >= duplicate_similarity to any earlier PR is rejected as a copy. If the earliest PR on an issue is still
+   flagged, a later verified PR on the same issue is flagged too ("waiting on #N's human review") rather than
+   paid.
+6. Invalid oracles are cached and reused forever, and Docker failures are blamed on the model. Only reuse cached
+   oracles with valid=True. Treat docker infrastructure failures (exit codes 125, 126, 127, or "Cannot connect to
+   the Docker daemon" / "No such image" in output) as an InfrastructureError that aborts that PR as "flag"
+   without spending LLM attempts and without caching.
+7. A generated case that calls the API wrongly fails on base with TypeError/AttributeError and is accepted as a
+   reproduction. Only accept base failures that are assertion failures, "DID NOT RAISE", or exceptions raised from
+   inside the package code (not from the call expression itself, e.g. "got an unexpected keyword argument",
+   "missing N required positional argument", "takes N positional arguments", "has no attribute" on the module).
+   Drop such cases (or treat the attempt as an authoring error with feedback).
+8. Receipts load the oracle from the shared cache at settle time, so a later run can swap it. Store the full
+   oracle used (or its sha plus an immutable copy) in the item data at verification time and build receipts from
+   that.
+9. `close --resume` accepts finished runs and can overwrite an approved run's status. Refuse to resume unless the
+   run's status is "running".
+
+## Low (fix if quick)
+
+- diffcheck: a deleted test file (`+++ /dev/null`) isn't attributed, so its removed tests aren't counted as
+  tampering. Keep the file from the `--- a/` line when `+++ /dev/null` follows.
+- source.py: pass --no-renames to the diff calls so renamed files are parsed correctly.
+- sandbox.py: TimeoutExpired.stdout/stderr are bytes; decode them.
+- run_id: add a short random suffix so two runs started in the same second don't collide.
+
+Commit message:
+
+    Close sandbox forgery holes and harden the close
+
+followed by a body listing the fixes.

@@ -1,0 +1,57 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4PZZSJY47T4F7NQY9EX38K6",
+  "session_id": "8ae5eab9-836a-4156-b179-128e2608bf89",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-12T02:45:10.507417434Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "README.md",
+    "src/linus/cli.py",
+    "src/linus/close.py",
+    "src/linus/diffcheck.py",
+    "src/linus/ledger.py",
+    "src/linus/oracle.py",
+    "src/linus/sandbox.py",
+    "src/linus/source.py",
+    "src/linus/verify.py",
+    "tests/test_close.py",
+    "tests/test_diffcheck.py",
+    "tests/test_oracle.py",
+    "tests/test_sandbox.py",
+    "tests/test_sandbox_demo.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-5-5",
+  "turn_id": "bdf3a62a83ce",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 82,
+    "cache_creation_tokens": 176521,
+    "cache_read_tokens": 5049023,
+    "output_tokens": 87378,
+    "api_call_count": 41
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-12T02:45:10.47096961Z",
+    "agent_lines": 1357,
+    "agent_removed": 162,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1357,
+    "total_lines_changed": 1519,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
