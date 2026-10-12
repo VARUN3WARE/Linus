@@ -15,6 +15,6 @@ Every row is a real run of `linus eval` against the demo bounty month (11 PRs, 6
 | 2026-10-12 02:31 | v4 code vs new forgery attacks (before fix) | 77% | 25% | 20% | 0% | $0.00077 | 6,167 | 2.5 | `2026-09-20261012-023058` | `b810aeed4d1619f5140600f600284d89` |
 | 2026-10-12 02:46 | v5 (forgery fixes: isolated oracle run, strict types, harness checks) | 100% | 0% | 0% | 0% | $0.00069 | 6,162 | 2.2 | `2026-09-20261012-024541-8a72` | `c7560a80a11201b97d01923f5fe9bb57` |
 | 2026-10-12 03:19 | v5 code vs red-team attacks #114/#115 (before fix) | 100% | 0% | 0% | 0% | $0.00077 | 6,493 | 2.0 | `2026-09-20261012-031911-a031` | `7ca70d0c09e3b52e76b0000f0e074042` |
-| 2026-10-12 03:22 | v5 code vs disguised red-team attack #116 (before fix) | 100% | 0% | 0% | 0% | $0.00077 | 6,645 | 2.0 | `2026-09-20261012-032211-a52b` | `b5cba9eece574dd9a9ebac8331848dc2` |
+| 2026-10-12 03:22 | v5 code, demo not yet rebuilt (#116 missing from this run; see next row) | 100% | 0% | 0% | 0% | $0.00077 | 6,645 | 2.0 | `2026-09-20261012-032211-a52b` | `b5cba9eece574dd9a9ebac8331848dc2` |
 | 2026-10-12 03:23 | v5 code vs disguised red-team attack #116 (before fix) | 100% | 0% | 0% | 0% | $0.00082 | 6,565 | 1.9 | `2026-09-20261012-032254-3005` | `e67b7aaaf8a3921d2a772faaa3629c73` |
 | 2026-10-12 03:40 | v6 (answers never enter the sandbox; red-team fixes) | 100% | 0% | 0% | 0% | $0.00073 | 6,207 | 1.8 | `2026-09-20261012-033947-a0ae` | `3952c9122cbadec1de92d2447b270a9f` |

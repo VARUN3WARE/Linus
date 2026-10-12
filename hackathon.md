@@ -32,9 +32,9 @@ writes a tamper-evident ledger for the maintainer to approve.
 
 | Tool | How we use it | Evidence |
 |---|---|---|
-| neatlogs | One trace per close: workflow span, agent span per PR, JEV calls as LLM spans with tokens and cost, auto-captured OpenAI calls, Docker runs as tool spans, anti-gaming and invariant guardrails | Workflow `linus`. Cold v4 run: trace `d471472b34e4ee099f72c18f53fde268`. _Add dashboard screenshots of the v2 (failure) and v4 (fixed) runs._ |
-| Entire | Enabled for Claude Code in this repo (`.entire/`, hooks in `.claude/settings.json`) with PII redaction on | `entire checkpoint list`. _The first build session ran with the parent folder as its working directory, so the repo's hooks never loaded and it has no checkpoints. Checkpoints are recorded for coding sessions run inside the repo, from Oct 12._ |
-| cfo.ai | Pricing, cost per verified PR, margins, runway | _Business plan link pending; inputs below_ |
+| neatlogs | One trace per close: workflow span, agent span per PR, JEV calls as LLM spans with tokens and cost, auto-captured OpenAI calls, sandbox runs as tool spans, anti-gaming and invariant guardrails | Workflow `linus`. Before/after pairs: v4 paying two forgeries `b810aeed4d1619f5140600f600284d89` → v5 `c7560a80a11201b97d01923f5fe9bb57`; v5's sandbox certifying #116 `e67b7aaaf8a3921d2a772faaa3629c73` → v6 `3952c9122cbadec1de92d2447b270a9f`. Live GitHub v6 close `dcf6aab1eeeb52ffa00bbc41e8684924`. _Add dashboard screenshots._ |
+| Entire | Enabled for the coding agent in this repo (`.entire/`, agent hooks) with PII (email/phone) redaction on | Every code commit from Oct 12 has an `Entire-Checkpoint` trailer; 7 checkpoints are pushed to GitHub (`refs/entire/checkpoints/...`, `entire checkpoint list`). The Oct 11 session ran with the parent folder as its working directory, so the repo's hooks never loaded and it has none. |
+| cfo.ai | Pricing, cost per verified PR, margins, runway | Measured inputs: `evals/economics.json` / `evals/economics.csv` (`uv run linus economics`). _Business plan link pending._ |
 | JEV | Gates, oracle audit, scoring levels | Every receipt records JEV's answers and model version (`jev-1.13.0`) |
 
 ## Build log
@@ -72,24 +72,62 @@ writes a tamper-evident ledger for the maintainer to approve.
   detected (`linus ledger`); re-running an approved month halts on the
   double-pay invariant.
 
+### 2026-10-12
+
+- Audit of the whole project by six independent reviewers (each finding re-checked by a
+  second agent). It found that Entire had recorded nothing (wrong working directory),
+  overstated README claims, and a high-severity hole: a PR could forge its own green run.
+  README claims corrected first.
+- Every code change from here on was made by a coding-agent session started inside the repo,
+  so each commit carries an Entire checkpoint. Turned on Entire's PII redaction after finding
+  that headless sessions carry the user's email.
+- **Forgery round:** added #112 (conftest that forces pytest's exit status to 0) and #113 (an
+  int whose `==` is always True, submitted before dave-k's honest fix). **v4 paid both** and
+  #113 took dave-k's bounty: 77% accuracy, 25% false-pay, 20% missed-good
+  (trace `b810aeed...`).
+- **v5:** oracle run from a Linus-owned directory with Linus's pytest config and no PR
+  conftest, strict JSON result types, JUnit cross-checks, harness/outcome-manipulation diff
+  checks, per-PR crash isolation, approve bound to the exact proposal, anti-gaming across
+  flagged PRs, invalid oracles not cached. 100% / 0% / 0% (trace `c7560a80...`).
+- **Live on GitHub:** `linus demo --publish` created
+  [VARUN3WARE/textkit-bounty](https://github.com/VARUN3WARE/textkit-bounty) with real PRs;
+  `linus close --github ... --comment` posted a verdict with evidence on every PR and a
+  leaderboard issue. `linus economics` exports measured unit economics for cfo.ai.
+- **Red-team round:** three attacking agents against a frozen v5, every finding reproduced
+  independently. Confirmed: import-time patching of the oracle's comparison helper via
+  `sys.modules`, a second package copy under `src/` in flat repos, six false rejections of
+  honest PRs, and logic bugs (infrastructure failures settling a month as rollover, among
+  others). Added #114, #115 and a disguised #116; **v5's sandbox certified #116**
+  (trace `e67b7aaa...`).
+- **v6:** the expected values never enter the sandbox (calls go in, raw results come out,
+  the host compares); base tests run from their own tree and every base test id must appear;
+  import roots from the base tree; narrower diff rules so honest code is never rejected as
+  forgery; infrastructure failures halt the run and stay resumable; a month is settled once;
+  evals can never be approved. The headless session doing v6 ran out of credit midway; it was
+  finished from a session outside the repo. 100% / 0% / 0% on all 16 PRs
+  (trace `3952c912...`), and on the live repo.
+
 ## Eval scorecard
 
 See [`evals/SCORECARD.md`](evals/SCORECARD.md). Every row is a real run against
 the demo month; ground truth is in `expected.json`, which the agent never sees.
 
-| Metric | v1 | v2 | v3 | v4 (5 cold runs) |
-|---|---|---|---|---|
-| Accuracy | 100% | 91% | 91% | 100% |
-| False-pay rate | 0% | 0% | 0% | 0% |
-| Missed-good rate | 0% | 20% | 20% | 0% |
-| Human-flag rate | 0% | 0% | 0% | 0% |
-| Model cost per PR | n/a | n/a | n/a | $0.0010 |
+| Metric | v1 | v2 | v3 | v4 (5 cold runs) | v4 vs forgeries | v5 | v6 |
+|---|---|---|---|---|---|---|---|
+| PRs | 11 | 11 | 11 | 11 | 13 | 13 | 16 |
+| Accuracy | 100% | 91% | 91% | 100% | 77% | 100% | 100% |
+| False-pay rate | 0% | 0% | 0% | 0% | 25% | 0% | 0% |
+| Missed-good rate | 0% | 20% | 20% | 0% | 20% | 0% | 0% |
+| Human-flag rate | 0% | 0% | 0% | 0% | 0% | 0% | 0% |
 
 ## Business plan inputs for cfo.ai
 
-Measured (demo month, cold runs):
-- Model cost per PR: **$0.0010** (JEV ~$0.00006, OpenAI ~$0.0009).
-- Agent time per PR: ~2.5 s, plus sandbox runs of ~1 s each.
+Measured by `uv run linus economics` over 8 cold runs, 110 PRs (`evals/economics.json`):
+- Model cost per PR: **$0.00086** (JEV $0.000054, OpenAI $0.00080).
+- Agent time 2.1 s per PR; 1.7 sandbox runs per PR.
+- Projection at the default assumptions ($49/repo/month, $0.005 sandbox per PR, 10x model
+  cost on real repos): gross margin 97% at 100 PRs/month, 72% at 1,000, negative at 10,000,
+  so pricing has to scale with PR volume.
 
 Assumptions to model (not measured yet):
 - Real repositories send more context per oracle: model cost $0.01 to $0.05 per PR.
@@ -101,6 +139,8 @@ Assumptions to model (not measured yet):
 
 ## Demo
 
+- Live repo: https://github.com/VARUN3WARE/textkit-bounty (verdicts on every PR,
+  leaderboard in issue #19)
 - Video: _pending_
 - `make judge`: builds the sandbox, runs unit tests, runs the close on the demo
   month and scores it.
@@ -109,15 +149,16 @@ Assumptions to model (not measured yet):
 
 - The demo month is small and self-made; it shows the mechanisms, not
   generalization.
-- Python + pytest projects only.
-- PRs come from a local git repo plus a fixture; the read-only GitHub source is
-  not built yet.
+- Python + pytest projects only; projects that must be installed to run their tests are not
+  supported yet.
+- A red team found what it found; more attacks surely exist.
 - Linus proposes payouts; it does not move money.
 
 ## Next steps
 
-- Read-only GitHub source and a backtest on a real repository's past month.
-- A red-team agent that writes new attack PRs; misses become eval cases.
+- Backtest on a real repository's past month.
+- Run the red team continuously; every confirmed attack becomes an eval case.
+- Run each oracle call in its own container for stronger isolation.
 - Credit for reviews and issue reproductions, not just code.
 
 ## Submission checklist
@@ -125,9 +166,11 @@ Assumptions to model (not measured yet):
 - [ ] Web check-in done, team confirmed
 - [x] Public repo with hackathon-period commits
 - [ ] neatlogs traces: before and after screenshots
-- [ ] Entire checkpoints attached to commits
+- [x] Entire checkpoints attached to commits
 - [ ] cfo.ai business plan included
 - [x] Failure recovery shown in a real run (v1 crash, resumed from checkpoints)
+- [x] Live demo on GitHub with real PRs and posted verdicts
+- [x] Before/after evidence for two rounds of attacks (eval rows + trace ids)
 - [ ] Demo video, 3 minutes or less
 - [ ] Building-in-public posts tagged #neatHack
 - [ ] X quote post published, Oct 12, 7:00 to 11:55 PM IST

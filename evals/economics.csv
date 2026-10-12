@@ -1,0 +1,124 @@
+basis,section,metric,value
+measured,unit,basis,cold runs
+measured,unit,cold_runs_used,8
+measured,unit,runs_used,8
+measured,unit,prs_measured,110
+measured,unit,jev_usd_per_run,0.000740875
+measured,unit,openai_usd_per_run,0.01102775
+measured,unit,jev_usd_per_pr,5.388181818181818e-05
+measured,unit,openai_usd_per_pr,0.0008020181818181818
+measured,unit,model_usd_per_pr,0.0008558999999999999
+measured,unit,agent_seconds_per_pr,2.1063636363636364
+measured,unit,sandbox_runs_per_pr,1.6712962962962963
+assumed,unit,price_per_repo_usd_month,49.0
+assumed,unit,sandbox_usd_per_pr,0.005
+assumed,unit,real_repo_multiplier,10.0
+projected,100 PRs/month,model_usd,0.8559
+projected,100 PRs/month,sandbox_usd,0.5
+projected,100 PRs/month,cost_usd,1.3559
+projected,100 PRs/month,cost_per_pr_usd,0.013559
+projected,100 PRs/month,price_usd,49.0
+projected,100 PRs/month,gross_margin,0.9723
+projected,100 PRs/month,agent_hours,0.06
+projected,100 PRs/month,sandbox_runs,167
+projected,1000 PRs/month,model_usd,8.559
+projected,1000 PRs/month,sandbox_usd,5.0
+projected,1000 PRs/month,cost_usd,13.559
+projected,1000 PRs/month,cost_per_pr_usd,0.013559
+projected,1000 PRs/month,price_usd,49.0
+projected,1000 PRs/month,gross_margin,0.7233
+projected,1000 PRs/month,agent_hours,0.59
+projected,1000 PRs/month,sandbox_runs,1671
+projected,10000 PRs/month,model_usd,85.59
+projected,10000 PRs/month,sandbox_usd,50.0
+projected,10000 PRs/month,cost_usd,135.59
+projected,10000 PRs/month,cost_per_pr_usd,0.013559
+projected,10000 PRs/month,price_usd,49.0
+projected,10000 PRs/month,gross_margin,-1.7671
+projected,10000 PRs/month,agent_hours,5.85
+projected,10000 PRs/month,sandbox_runs,16713
+measured,run 2026-09-20261011-083603,prs,11
+measured,run 2026-09-20261011-083603,jev_usd_per_pr,4.5e-05
+measured,run 2026-09-20261011-083603,openai_usd_per_pr,
+measured,run 2026-09-20261011-083603,agent_seconds_per_pr,2.4181818181818184
+measured,run 2026-09-20261011-083603,sandbox_runs_per_pr,1.8181818181818181
+measured,run 2026-09-20261011-083831,prs,11
+measured,run 2026-09-20261011-083831,jev_usd_per_pr,4.5e-05
+measured,run 2026-09-20261011-083831,openai_usd_per_pr,
+measured,run 2026-09-20261011-083831,agent_seconds_per_pr,2.2818181818181817
+measured,run 2026-09-20261011-083831,sandbox_runs_per_pr,1.7272727272727273
+measured,run 2026-09-20261011-084057,prs,11
+measured,run 2026-09-20261011-084057,jev_usd_per_pr,6.109090909090909e-05
+measured,run 2026-09-20261011-084057,openai_usd_per_pr,
+measured,run 2026-09-20261011-084057,agent_seconds_per_pr,2.609090909090909
+measured,run 2026-09-20261011-084057,sandbox_runs_per_pr,1.7272727272727273
+measured,run 2026-09-20261011-084212,prs,11
+measured,run 2026-09-20261011-084212,jev_usd_per_pr,6.227272727272727e-05
+measured,run 2026-09-20261011-084212,openai_usd_per_pr,
+measured,run 2026-09-20261011-084212,agent_seconds_per_pr,2.5818181818181816
+measured,run 2026-09-20261011-084212,sandbox_runs_per_pr,1.8181818181818181
+measured,run 2026-09-20261011-084253,prs,11
+measured,run 2026-09-20261011-084253,jev_usd_per_pr,6.236363636363636e-05
+measured,run 2026-09-20261011-084253,openai_usd_per_pr,
+measured,run 2026-09-20261011-084253,agent_seconds_per_pr,2.8272727272727276
+measured,run 2026-09-20261011-084253,sandbox_runs_per_pr,1.8181818181818181
+measured,run 2026-09-20261011-084327,prs,11
+measured,run 2026-09-20261011-084327,jev_usd_per_pr,6.2e-05
+measured,run 2026-09-20261011-084327,openai_usd_per_pr,
+measured,run 2026-09-20261011-084327,agent_seconds_per_pr,2.4727272727272727
+measured,run 2026-09-20261011-084327,sandbox_runs_per_pr,1.8181818181818181
+measured,run 2026-09-20261011-084630,prs,11
+measured,run 2026-09-20261011-084630,jev_usd_per_pr,6.209090909090909e-05
+measured,run 2026-09-20261011-084630,openai_usd_per_pr,0.0009834545454545454
+measured,run 2026-09-20261011-084630,agent_seconds_per_pr,2.4909090909090907
+measured,run 2026-09-20261011-084630,sandbox_runs_per_pr,1.8181818181818181
+measured,run 2026-09-20261011-084715,prs,11
+measured,run 2026-09-20261011-084715,jev_usd_per_pr,4.5e-05
+measured,run 2026-09-20261011-084715,openai_usd_per_pr,0.0
+measured,run 2026-09-20261011-084715,agent_seconds_per_pr,0.8727272727272727
+measured,run 2026-09-20261011-084715,sandbox_runs_per_pr,1.8181818181818181
+measured,run 2026-09-20261011-084734,prs,11
+measured,run 2026-09-20261011-084734,jev_usd_per_pr,6.263636363636364e-05
+measured,run 2026-09-20261011-084734,openai_usd_per_pr,0.0009171818181818183
+measured,run 2026-09-20261011-084734,agent_seconds_per_pr,2.2363636363636363
+measured,run 2026-09-20261011-084734,sandbox_runs_per_pr,1.8181818181818181
+measured,run 2026-09-20261012-023058,prs,13
+measured,run 2026-09-20261012-023058,jev_usd_per_pr,5.938461538461538e-05
+measured,run 2026-09-20261012-023058,openai_usd_per_pr,0.0007916923076923077
+measured,run 2026-09-20261012-023058,agent_seconds_per_pr,2.4538461538461536
+measured,run 2026-09-20261012-023058,sandbox_runs_per_pr,1.8461538461538463
+measured,run 2026-09-20261012-024541-8a72,prs,13
+measured,run 2026-09-20261012-024541-8a72,jev_usd_per_pr,5.284615384615385e-05
+measured,run 2026-09-20261012-024541-8a72,openai_usd_per_pr,0.000789923076923077
+measured,run 2026-09-20261012-024541-8a72,agent_seconds_per_pr,2.223076923076923
+measured,run 2026-09-20261012-024541-8a72,sandbox_runs_per_pr,1.5384615384615385
+measured,run 2026-09-20261012-031911-a031,prs,15
+measured,run 2026-09-20261012-031911-a031,jev_usd_per_pr,5.1666666666666664e-05
+measured,run 2026-09-20261012-031911-a031,openai_usd_per_pr,0.0007838666666666667
+measured,run 2026-09-20261012-031911-a031,agent_seconds_per_pr,2.0266666666666664
+measured,run 2026-09-20261012-031911-a031,sandbox_runs_per_pr,1.4
+measured,run 2026-09-20261012-032211-a52b,prs,15
+measured,run 2026-09-20261012-032211-a52b,jev_usd_per_pr,5.126666666666667e-05
+measured,run 2026-09-20261012-032211-a52b,openai_usd_per_pr,0.0008295333333333333
+measured,run 2026-09-20261012-032211-a52b,agent_seconds_per_pr,2.033333333333333
+measured,run 2026-09-20261012-032211-a52b,sandbox_runs_per_pr,1.4
+measured,run 2026-09-20261012-032254-3005,prs,16
+measured,run 2026-09-20261012-032254-3005,jev_usd_per_pr,5.14375e-05
+measured,run 2026-09-20261012-032254-3005,openai_usd_per_pr,0.000755125
+measured,run 2026-09-20261012-032254-3005,agent_seconds_per_pr,1.85
+measured,run 2026-09-20261012-032254-3005,sandbox_runs_per_pr,1.4375
+measured,run 2026-09-20261012-033947-a0ae,prs,16
+measured,run 2026-09-20261012-033947-a0ae,jev_usd_per_pr,4.55625e-05
+measured,run 2026-09-20261012-033947-a0ae,openai_usd_per_pr,0.0006544375
+measured,run 2026-09-20261012-033947-a0ae,agent_seconds_per_pr,1.775
+measured,run 2026-09-20261012-033947-a0ae,sandbox_runs_per_pr,1.6875
+measured,run 2026-10-20261012-030122-a3ac,prs,13
+measured,run 2026-10-20261012-030122-a3ac,jev_usd_per_pr,5.238461538461538e-05
+measured,run 2026-10-20261012-030122-a3ac,openai_usd_per_pr,0.0008646923076923076
+measured,run 2026-10-20261012-030122-a3ac,agent_seconds_per_pr,2.4461538461538463
+measured,run 2026-10-20261012-030122-a3ac,sandbox_runs_per_pr,1.5384615384615385
+measured,run 2026-10-20261012-034105-9a9c,prs,16
+measured,run 2026-10-20261012-034105-9a9c,jev_usd_per_pr,4.59375e-05
+measured,run 2026-10-20261012-034105-9a9c,openai_usd_per_pr,0.0006451875
+measured,run 2026-10-20261012-034105-9a9c,agent_seconds_per_pr,1.7375
+measured,run 2026-10-20261012-034105-9a9c,sandbox_runs_per_pr,1.6875
