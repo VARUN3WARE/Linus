@@ -1,0 +1,42 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4Q0V9B1TF11KZ6VASVQPGXN",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".env.example",
+    "README.md",
+    "src/linus/cli.py",
+    "src/linus/close.py",
+    "src/linus/demo.py",
+    "src/linus/economics.py",
+    "src/linus/evals.py",
+    "src/linus/github.py",
+    "src/linus/github_report.py",
+    "src/linus/publish.py",
+    "src/linus/source.py",
+    "tests/conftest.py",
+    "tests/test_close.py",
+    "tests/test_economics.py",
+    "tests/test_github.py",
+    "tests/test_github_report.py",
+    "tests/test_publish.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 108,
+    "cache_creation_tokens": 172385,
+    "cache_read_tokens": 7151276,
+    "output_tokens": 85798,
+    "api_call_count": 54
+  }
+}
