@@ -1,7 +1,9 @@
 """Deep verification in the sandbox. For a code PR:
 
-1. The oracle test runs against the PR's code. It already failed on the base
-   code, so passing here is the fail-to-pass proof.
+1. The oracle test runs against the PR's code, from a Linus-owned directory
+   with Linus's own pytest config (the PR's conftest and settings never load).
+   It already failed on the base code, so every case passing here is the
+   fail-to-pass proof.
 2. The PR's own tests plus a copy of the base branch's tests run against the
    PR's code. Running the base tests catches PRs that delete or skip the very
    test their change breaks.
@@ -16,7 +18,7 @@ from pathlib import Path
 
 from linus.diffcheck import TEST_PATH, DiffSignals
 from linus.oracle import Oracle
-from linus.sandbox import pytest
+from linus.sandbox import pytest, run_oracle
 from linus.source import LocalSource, PullRequest
 
 BASE_TESTS_DIR = "linus_base_tests"
@@ -48,18 +50,19 @@ def verify(source: LocalSource, pr: PullRequest, oracle: Oracle | None,
         source.export(pr.head_sha, tree)
 
         if oracle is not None:
-            target = tree / oracle.test_path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(oracle.test_code)
-            repro = pytest(tree, [oracle.test_path], label=f"pr{pr.number}_oracle")
+            repro = run_oracle(tree, oracle.test_code, label=f"pr{pr.number}_oracle")
             runs.append(repro.to_dict())
             if repro.outcome == "error":
-                return Verification("inconclusive", "oracle test did not run cleanly on the PR code", runs)
+                why = repro.problem or "oracle test did not run cleanly on the PR code"
+                return Verification("inconclusive", why, runs)
             if repro.outcome == "fail":
                 total = repro.passed + repro.failed
                 return Verification(
                     "not_fixed", f"reproduction test still fails on the PR ({repro.failed} of {total} failing)",
                     runs)
+            if repro.passed != oracle.case_count:
+                return Verification(
+                    "inconclusive", f"oracle has {oracle.case_count} cases but {repro.passed} passed", runs)
 
         copied = _copy_base_tests(source, pr.base_sha, tree)
         targets = [d for d in ("tests", "test") if (tree / d).is_dir()]
@@ -72,7 +75,8 @@ def verify(source: LocalSource, pr: PullRequest, oracle: Oracle | None,
             proof = "fails on base, passes on PR" if oracle else "docs only"
             return Verification("verified", f"{proof}; full suite incl. base tests green ({suite.passed} passed)", runs)
         if suite.outcome == "error":
-            return Verification("inconclusive", "test suite did not run cleanly on the PR code", runs)
+            why = suite.problem or "test suite did not run cleanly on the PR code"
+            return Verification("inconclusive", why, runs)
         if signals.tampering:
             removed = ", ".join(signals.removed_tests) or f"{signals.added_skips} skip marker(s)"
             return Verification(

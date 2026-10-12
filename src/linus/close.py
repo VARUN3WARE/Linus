@@ -9,7 +9,9 @@ crashed run resumes where it stopped. Nothing is paid until a maintainer
 approves the proposed ledger (`linus approve`).
 """
 
+import hashlib
 import os
+import secrets
 import time
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -65,6 +67,19 @@ def corroboration(answers: dict, signals: DiffSignals) -> str:
     return f"; {'; '.join(notes)}" if notes else ""
 
 
+def oracle_record(oracle: Oracle) -> dict:
+    """The oracle exactly as used, frozen into the PR's item at verification time:
+    receipts are built from this, so a later run can't swap the shared cache under it."""
+    record = {k: getattr(oracle, k) for k in ("issue", "valid", "test_path", "test_sha256", "test_code",
+                                              "model", "cases", "dropped")}
+    record["attempts"] = [{"attempt": a["attempt"], "proposed": a.get("proposed"), "kept": a.get("kept"),
+                           "problem": a.get("problem"),
+                           "base_outcome": (a.get("base_run") or {}).get("outcome"),
+                           "base_failed": (a.get("base_run") or {}).get("failed")}
+                          for a in oracle.attempts]
+    return record
+
+
 class Close:
     def __init__(self, settings: Settings, source: LocalSource, policy: Policy, ui,
                  run_id: str | None = None, crash_after: int | None = None,
@@ -76,7 +91,9 @@ class Close:
         self.gen = Generator(settings)
         self.crash_after = crash_after
         self.resumed = run_id is not None
-        self.run_id = run_id or f"{source.period}-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"
+        # The random suffix keeps two runs started in the same second apart.
+        self.run_id = run_id or (f"{source.period}-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"
+                                 f"-{secrets.token_hex(2)}")
         self.run_dir = settings.state_dir / "runs" / self.run_id
         self.workdir = settings.state_dir / "work"
         self.workdir.mkdir(parents=True, exist_ok=True)
@@ -97,6 +114,8 @@ class Close:
         data["issue"] = issue.number if issue else None
         if why := self.policy.excluded(pr.author):
             return "reject", why
+        if signals.manipulates_outcome:
+            return "reject", "changes test outcomes instead of the code: " + "; ".join(signals.outcome_hacks[:3])
         if signals.docs_only and not self.policy.include_docs:
             return "reject", "docs-only PRs are not eligible under bounty.yml"
         if not signals.docs_only and issue is None:
@@ -108,8 +127,12 @@ class Close:
         return None, ""
 
     def _oracle(self, issue: Issue, pr: PullRequest, signals: DiffSignals) -> Oracle:
+        # Only a valid oracle in the current format is reused: a failed build may have
+        # been bad luck or a Docker problem. Infrastructure errors propagate before
+        # anything is cached.
         cached = self.store.oracle(self.source.name, issue.number, pr.base_sha)
-        if cached and (self.reuse_oracles or cached.get("run_id") == self.run_id):
+        current = cached and cached.get("valid") and cached.get("format") == oracle_mod.FORMAT
+        if current and (self.reuse_oracles or cached.get("run_id") == self.run_id):
             return Oracle.from_dict(cached)
         built = oracle_mod.build(self.gen, self.jev, self.source, issue, pr.base_sha,
                                  set(signals.code_files), self.workdir)
@@ -131,71 +154,111 @@ class Close:
         self.ui.item(pr, verdict, reason, data)
 
     def process(self, pr: PullRequest, item: dict | None) -> None:
+        """Judge one PR. Any failure flags this PR for a human and the close goes
+        on: one malformed PR must not stop the month, or crash every resume."""
         data = item["data"] if item else {}
         stage = item["stage"] if item else "queued"
         started = time.monotonic()
         tokens0 = (self.jev.input_tokens, self.gen.prompt_tokens, self.gen.completion_tokens)
         with step(f"pr_{pr.number}", kind="AGENT", author=pr.author, title=pr.title) as span:
-            issue = self._issue(pr)
-            if stage == "queued":
-                verdict, reason = self._gate(pr, issue, data)
-                if verdict:
-                    return self._finish(pr, span, data, verdict, reason, started, tokens0)
-                self.store.save_item(self.run_id, pr.number, "gated", None, data)
+            try:
+                verdict, reason = self._judge(pr, data, stage)
+            except sandbox.InfrastructureError as exc:
+                data["error"] = f"InfrastructureError: {exc}"
+                verdict, reason = "flag", f"sandbox infrastructure failed, nothing was judged: {exc}"
+            except Exception as exc:  # noqa: BLE001 - recorded on the PR, the run continues
+                data["error"] = f"{type(exc).__name__}: {exc}"
+                verdict, reason = "flag", f"could not process this PR: {data['error']}"
+            self._finish(pr, span, data, verdict, reason[:500], started, tokens0)
 
-            signals = DiffSignals(**data["signals"])
-            oracle = None
-            if not signals.docs_only:
-                oracle = self._oracle(issue, pr, signals)
-                data["oracle"] = {"issue": oracle.issue, "valid": oracle.valid,
-                                  "test_sha256": oracle.test_sha256, "attempts": len(oracle.attempts)}
-                if not oracle.valid:
-                    return self._finish(pr, span, data, "flag",
-                                        f"could not build a reproduction test for #{issue.number}",
-                                        started, tokens0)
-            result = verify_mod.verify(self.source, pr, oracle, signals, self.workdir)
-            data["verification"] = asdict(result)
-            verdict, reason = VERDICT[result.outcome], result.reason
-            answers = data.get("gate", {}).get("answers", {})
-            if result.outcome == "not_fixed" and conflicting(answers, signals, result.runs[0]):
-                verdict = "flag"
-                reason = (f"evidence conflicts: {result.reason}, but every cheap signal says this fully "
-                          f"fixes #{issue.number}; a human should check the failing case")
-            elif verdict == "reject":
-                reason += corroboration(answers, signals)
-            self._finish(pr, span, data, verdict, reason, started, tokens0)
+    def _judge(self, pr: PullRequest, data: dict, stage: str) -> tuple[str, str]:
+        issue = self._issue(pr)
+        if stage == "queued":
+            verdict, reason = self._gate(pr, issue, data)
+            if verdict:
+                return verdict, reason
+            self.store.save_item(self.run_id, pr.number, "gated", None, data)
+
+        signals = DiffSignals(**data["signals"])
+        oracle = None
+        if not signals.docs_only:
+            oracle = self._oracle(issue, pr, signals)
+            data["oracle"] = oracle_record(oracle)
+            if not oracle.valid:
+                return "flag", f"could not build a reproduction test for #{issue.number}"
+        result = verify_mod.verify(self.source, pr, oracle, signals, self.workdir)
+        data["verification"] = asdict(result)
+        verdict, reason = VERDICT[result.outcome], result.reason
+        answers = data.get("gate", {}).get("answers", {})
+        if result.outcome == "not_fixed" and conflicting(answers, signals, result.runs[0]):
+            verdict = "flag"
+            reason = (f"evidence conflicts: {result.reason}, but every cheap signal says this fully "
+                      f"fixes #{issue.number}; a human should check the failing case")
+        elif verdict == "reject":
+            reason += corroboration(answers, signals)
+        elif verdict == "pay" and signals.touches_test_harness:
+            verdict = "flag"
+            reason = (f"{result.reason}, but the PR edits the test harness "
+                      f"({', '.join(signals.harness_files)}); a human should check it doesn't change "
+                      f"how tests run")
+        return verdict, reason
 
     # -- across PRs -----------------------------------------------------------
 
     def anti_gaming(self, pulls: list[PullRequest], items: dict[int, dict]) -> None:
-        """First verified fix for an issue wins; later ones are copies or too late."""
+        """Every PR is compared with every earlier PR on the same issue (docs-only
+        PRs with earlier docs-only PRs), whatever their verdicts: a copy of a
+        rejected PR is still a copy. The first verified fix for an issue wins, and
+        a later fix waits while an earlier one is with a human."""
         with step("anti_gaming", kind="GUARDRAIL") as span:
-            winners: dict[int, PullRequest] = {}
+            earlier: dict[object, list[PullRequest]] = {}
             prints: dict[int, set[str]] = {}
             changed = []
             for pr in pulls:
-                item = items[pr.number]
+                item = items.get(pr.number)
+                if not item or not item["data"].get("signals"):
+                    continue
                 data = item["data"]
-                if item["verdict"] != "pay" or DiffSignals(**data["signals"]).docs_only:
+                docs = DiffSignals(**data["signals"]).docs_only
+                group = "docs" if docs else data.get("issue")
+                if group is None:
                     continue
                 prints[pr.number] = diffcheck.change_fingerprint(self.source.diff(pr))
-                issue = data["issue"]
-                if issue not in winners:
-                    winners[issue] = pr
+                before = earlier.setdefault(group, [])
+                found = self._against_earlier(pr, before, items, prints, docs)
+                before.append(pr)
+                if not found:
                     continue
-                first = winners[issue]
-                sim = diffcheck.similarity(prints[first.number], prints[pr.number])
-                if sim >= self.policy.duplicate_similarity:
-                    reason = f"copy of #{first.number} ({sim:.0%} of changed lines identical), submitted later"
-                else:
-                    reason = f"issue #{issue} was already fixed by #{first.number}, submitted earlier"
-                data["anti_gaming"] = {"winner": first.number, "similarity": round(sim, 3)}
-                data["verdict"], data["reason"] = "reject", reason
-                item["verdict"] = "reject"
-                self.store.save_item(self.run_id, pr.number, "done", "reject", data)
+                verdict, reason, other, sim = found
+                data["anti_gaming"] = {"winner": other, "similarity": round(sim, 3)}
+                data["verdict"], data["reason"] = verdict, reason
+                item["verdict"] = verdict
+                self.store.save_item(self.run_id, pr.number, "done", verdict, data)
                 changed.append(pr.number)
-                self.ui.item(pr, "reject", reason, data, late=True)
-            annotate(span, rejected=changed)
+                self.ui.item(pr, verdict, reason, data, late=True)
+            annotate(span, changed=changed)
+
+    def _against_earlier(self, pr: PullRequest, before: list[PullRequest], items: dict[int, dict],
+                         prints: dict[int, set[str]], docs: bool) -> tuple[str, str, int, float] | None:
+        """A new (verdict, reason, other PR, similarity) for `pr`, or None to keep its verdict."""
+        if not before:
+            return None
+        sims = {p.number: diffcheck.similarity(prints[p.number], prints[pr.number]) for p in before}
+        closest = max(before, key=lambda p: sims[p.number])
+        verdict = items[pr.number]["verdict"]
+        if sims[closest.number] >= self.policy.duplicate_similarity and verdict != "reject":
+            return ("reject", f"copy of #{closest.number} ({sims[closest.number]:.0%} of changed lines "
+                    f"identical), submitted later", closest.number, sims[closest.number])
+        if docs or verdict != "pay":
+            return None
+        issue = items[pr.number]["data"]["issue"]
+        if paid := next((p for p in before if items[p.number]["verdict"] == "pay"), None):
+            return ("reject", f"issue #{issue} was already fixed by #{paid.number}, submitted earlier",
+                    paid.number, sims[paid.number])
+        if flagged := next((p for p in before if items[p.number]["verdict"] == "flag"), None):
+            return ("flag", f"verified, but waiting on #{flagged.number}'s human review: it targets "
+                    f"#{issue} and was submitted earlier", flagged.number, sims[flagged.number])
+        return None
 
     def settle(self, pulls: list[PullRequest], items: dict[int, dict]) -> dict:
         policy = self.policy
@@ -229,7 +292,10 @@ class Close:
                 annotate(guard, problems=problems, ok=not problems)
             status = "halted" if problems else "proposed"
 
-            image = sandbox.image_id()
+            try:
+                image = sandbox.image_id()
+            except sandbox.InfrastructureError:
+                image = "unavailable"
             receipt_hashes: dict[int, str] = {}
             for pr in pulls:
                 receipt = self._receipt(pr, items[pr.number]["data"], allocations, image)
@@ -237,6 +303,7 @@ class Close:
                 receipt_hashes[pr.number] = digest
 
             entries = []
+            proposal_sha256 = None
             if not problems:
                 for a in allocations:
                     for who, cents in sorted(a.payouts.items()):
@@ -251,26 +318,20 @@ class Close:
                         entries.append({"type": "rollover", "repo": self.source.name, "period": self.source.period,
                                         "run_id": self.run_id, "currency": a.currency,
                                         "amount": a.rollover_cents / 100})
-                proposed = self.run_dir / "ledger.proposed.jsonl"
-                proposed.write_text("".join(ledger.canonical(e).decode() + "\n" for e in entries))
+                raw = "".join(ledger.canonical(e).decode() + "\n" for e in entries).encode()
+                self.run_dir.mkdir(parents=True, exist_ok=True)  # no receipts were written for an empty month
+                (self.run_dir / "ledger.proposed.jsonl").write_bytes(raw)
+                # `linus approve` refuses a proposal whose bytes no longer match this.
+                proposal_sha256 = hashlib.sha256(raw).hexdigest()
 
             summary = self._summary(pulls, items, allocations, problems, status)
+            summary["proposal_sha256"] = proposal_sha256
             self.store.finish_run(self.run_id, status, summary)
             annotate(span, status=status, problems=problems)
         return summary
 
     def _receipt(self, pr: PullRequest, data: dict, allocations, image: str) -> dict:
-        oracle = None
-        if data.get("oracle") and data.get("issue") is not None:
-            cached = self.store.oracle(self.source.name, data["issue"], pr.base_sha)
-            if cached:
-                oracle = {k: cached.get(k) for k in ("issue", "valid", "test_path", "test_sha256", "test_code",
-                                                     "model", "cases", "dropped")}
-                oracle["attempts"] = [{"attempt": a["attempt"], "proposed": a.get("proposed"),
-                                       "kept": a.get("kept"), "problem": a.get("problem"),
-                                       "base_outcome": (a.get("base_run") or {}).get("outcome"),
-                                       "base_failed": (a.get("base_run") or {}).get("failed")}
-                                      for a in cached["attempts"]]
+        oracle = data.get("oracle")  # frozen when the PR was verified, see oracle_record()
         payout = {a.currency: a.payouts.get(pr.author, 0) / 100 for a in allocations} \
             if data.get("verdict") == "pay" else {}
         return {
@@ -317,8 +378,12 @@ class Close:
 
     def run(self) -> dict:
         if self.resumed:
-            if not self.store.run(self.run_id):
+            existing = self.store.run(self.run_id)
+            if not existing:
                 raise ValueError(f"no run {self.run_id} to resume")
+            if existing["status"] != "running":
+                # A finished run's status (proposed, halted, approved) must never be overwritten.
+                raise ValueError(f"run {self.run_id} is {existing['status']}; only unfinished runs can be resumed")
         else:
             self.store.create_run(self.run_id, self.source.name, self.source.period)
         pulls = self.source.pulls()

@@ -8,8 +8,8 @@ Three steps, each owned by the right tool:
    and cases it finds inconsistent are dropped. (v2 lost a correct PR to a
    generated case that contradicted the issue; this is the fix.)
 3. Code renders the surviving cases into a pytest file, and the sandbox
-   proves it fails on the buggy base code. If it doesn't, the output goes
-   back to the model for another try (bounded).
+   proves it fails on the buggy base code for a real reason. If it doesn't,
+   the output goes back to the model for another try (bounded).
 """
 
 import ast
@@ -23,9 +23,10 @@ from pathlib import Path
 
 from typesafe_sdk import Noul
 
+from linus import sandbox
 from linus.jev import Jev
 from linus.llm import Generator
-from linus.sandbox import RunResult, pytest
+from linus.sandbox import ORACLE_FILE, RunResult
 from linus.source import Issue, LocalSource
 from linus.tracing import annotate, step
 
@@ -33,11 +34,50 @@ MAX_ATTEMPTS = 3
 MIN_CASES = 2
 KEEP_THRESHOLD = 0.5  # JEV probability that a case is consistent with the issue
 SOURCE_BUDGET = 40_000  # characters of base source shown to the model
-TEST_NAME = "test_linus_repro.py"
-# Failing on the base code only counts if the test fails for a real reason. These
-# mean the test itself is broken (v3 "reproduced" a bug with NameError).
-AUTHORING_ERRORS = ("NameError", "ImportError", "ModuleNotFoundError", "SyntaxError",
-                    "IndentationError", "fixture")
+TEST_NAME = ORACLE_FILE
+# Bumped when the rendered test changes meaning; cached oracles in an older format
+# are rebuilt (format 1 compared with a plain ==, which the result controls).
+FORMAT = 2
+TEST_DEF = re.compile(r"^def test_", re.M)
+# Failing on the base code only counts if the test fails for a real reason. A case
+# that calls the API wrongly fails on every version of the code (v3 "reproduced" a
+# bug with NameError), so these failures are authoring errors, not reproductions.
+REAL_FAILURES = ("AssertionError", "Failed: DID NOT RAISE")
+MISCALLS = re.compile(r"got an unexpected keyword argument|missing \d+ required (positional|keyword-only) "
+                      r"argument|takes (from )?\d+ (to \d+ )?positional arguments?|module '[\w.]+' has no "
+                      r"attribute|not a plain JSON value")
+
+# Every value case goes through _linus_check, so the result can't choose how it
+# compares: only exact JSON types pass (an int subclass whose __eq__ always
+# returns True does not), and the comparison is between JSON texts. json.dumps
+# and type are bound before the package under test is imported.
+HELPERS = '''
+_json_dumps, _type = json.dumps, type
+_JSON_TYPES = (str, int, float, bool, list, dict, type(None))
+
+
+def _linus_plain(value, where="result"):
+    kind = _type(value)
+    for allowed in _JSON_TYPES:
+        if kind is allowed:
+            break
+    else:
+        raise AssertionError(f"linus: {where} is a {kind.__name__}, not a plain JSON value")
+    if kind is list:
+        for item in value:
+            _linus_plain(item, where + "[]")
+    elif kind is dict:
+        for key, item in value.items():
+            if _type(key) is not str:
+                raise AssertionError(f"linus: {where} has a key that is not a plain JSON value")
+            _linus_plain(item, where + "[" + key + "]")
+
+
+def _linus_check(result, expected):
+    _linus_plain(result)
+    got, want = _json_dumps(result, sort_keys=True), _json_dumps(expected, sort_keys=True)
+    assert got == want, f"{got} != {want}"
+'''
 
 SYSTEM = """You write reproduction test cases for bug reports in Python projects.
 
@@ -72,6 +112,12 @@ class Oracle:
     dropped: list[dict] = field(default_factory=list)
     attempts: list[dict] = field(default_factory=list)
     model: str = ""
+    format: int = FORMAT
+
+    @property
+    def case_count(self) -> int:
+        """Tests in the rendered file: a PR passes only if every one of them ran and passed."""
+        return len(TEST_DEF.findall(self.test_code))
 
     def to_dict(self) -> dict:
         return self.__dict__.copy()
@@ -102,14 +148,36 @@ def _parse_cases(text: str) -> tuple[list[str], list[dict]]:
 
 
 def render(imports: list[str], cases: list[dict]) -> str:
-    lines = ["import pytest", "", *imports, ""]
+    lines = ["import json", "", "import pytest", HELPERS, *imports, ""]
     for i, case in enumerate(cases):
         lines += ["", f"def test_repro_{i}():"]
         if case["raises"]:
             lines += [f"    with pytest.raises({case['raises']}):", f"        {case['call']}"]
         else:
-            lines.append(f"    assert {case['call']} == {case['expected']}")
+            lines.append(f"    _linus_check({case['call']}, {case['expected']})")
     return "\n".join(lines) + "\n"
+
+
+def reproduces(case: dict) -> bool:
+    """A base failure that shows the bug: an assertion, DID NOT RAISE, or an
+    exception raised inside the package. Not one raised by the call expression
+    itself (wrong arguments, a name the module doesn't have)."""
+    message = case.get("message", "")
+    if MISCALLS.search(message):
+        return False
+    if message.startswith(REAL_FAILURES):
+        return True
+    where = case.get("where", "")
+    return bool(where) and Path(where).name != ORACLE_FILE
+
+
+def base_run(source: LocalSource, base_sha: str, code: str, workdir: Path, label: str) -> RunResult:
+    tree = Path(tempfile.mkdtemp(prefix="base-", dir=workdir))
+    try:
+        source.export(base_sha, tree)
+        return sandbox.run_oracle(tree, code, label=label)
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
 
 
 def audit(jev: Jev, issue: Issue, cases: list[dict]) -> list[float]:
@@ -130,13 +198,6 @@ def audit(jev: Jev, issue: Issue, cases: list[dict]) -> list[float]:
     return [response.nouls[f"case_{i}"].noul for i in range(len(cases))]
 
 
-def _test_dir(files: list[str]) -> str:
-    for candidate in ("tests", "test"):
-        if any(f.startswith(candidate + "/") for f in files):
-            return candidate
-    return "."
-
-
 def _context(source: LocalSource, base_sha: str, focus: set[str]) -> tuple[str, str]:
     """Base source code and existing tests to show the model."""
     files = source.files_at(base_sha)
@@ -154,10 +215,9 @@ def _context(source: LocalSource, base_sha: str, focus: set[str]) -> tuple[str, 
 
 def build(gen: Generator, jev: Jev, source: LocalSource, issue: Issue, base_sha: str,
           focus: set[str], workdir: Path) -> Oracle:
+    sandbox.image_id()  # fail on a broken Docker before spending any generation
     code_ctx, tests_ctx = _context(source, base_sha, focus)
-    test_dir = _test_dir(source.files_at(base_sha))
-    rel = f"{test_dir}/{TEST_NAME}" if test_dir != "." else TEST_NAME
-    oracle = Oracle(issue=issue.number, valid=False, test_path=rel, model=gen.model)
+    oracle = Oracle(issue=issue.number, valid=False, test_path=TEST_NAME, model=gen.model)
     feedback = ""
     with step(f"oracle.issue_{issue.number}", kind="CHAIN", issue=issue.number) as span:
         for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -186,22 +246,28 @@ def build(gen: Generator, jev: Jev, source: LocalSource, issue: Issue, base_sha:
                 continue
 
             code = render(imports, kept)
-            tree = Path(tempfile.mkdtemp(prefix="base-", dir=workdir))
-            try:
-                source.export(base_sha, tree)
-                (tree / rel).parent.mkdir(parents=True, exist_ok=True)
-                (tree / rel).write_text(code)
-                result: RunResult = pytest(tree, [rel], label=f"oracle_{issue.number}_try{attempt}")
-            finally:
-                shutil.rmtree(tree, ignore_errors=True)
+            label = f"oracle_{issue.number}_try{attempt}"
+            result = base_run(source, base_sha, code, workdir, label)
             record["base_run"] = result.to_dict()
 
-            broken = [f for f in result.failures if f.split(":")[0].strip() in AUTHORING_ERRORS
-                      or "fixture" in f]
-            if broken:
-                record["problem"] = "test is broken: " + broken[0][:120]
-                feedback = ("The test file itself is broken, it fails on its own errors rather than on "
-                            f"the bug: {broken[0]}\n\npytest output:\n{result.output_tail}")
+            miscalled = [c for c in result.cases if c["outcome"] == "failure" and not reproduces(c)]
+            if miscalled and result.outcome == "fail":
+                names = {c["name"] for c in miscalled}
+                survivors = [c for i, c in enumerate(kept) if f"test_repro_{i}" not in names]
+                record["miscalled"] = [c["message"][:200] for c in miscalled]
+                if len(survivors) >= MIN_CASES and len(survivors) < len(kept):
+                    dropped += [c | {"why": "fails on base by calling the API wrongly"}
+                                for i, c in enumerate(kept) if f"test_repro_{i}" in names]
+                    kept, code = survivors, render(imports, survivors)
+                    result = base_run(source, base_sha, code, workdir, label + "_trimmed")
+                    record["base_run"] = result.to_dict()
+                    miscalled = [c for c in result.cases if c["outcome"] == "failure" and not reproduces(c)]
+            if miscalled or (result.outcome == "error" and result.errors):
+                why = miscalled[0]["message"] if miscalled else "errors while collecting or setting up the tests"
+                record["problem"] = "test is broken: " + why[:120]
+                feedback = ("The test file itself is broken: it fails on its own errors (calling the API "
+                            f"wrongly, unknown names) rather than on the bug: {why}\n\n"
+                            f"pytest output:\n{result.output_tail}")
                 continue
             if result.outcome == "fail" and result.failed >= 1:
                 oracle.valid = True

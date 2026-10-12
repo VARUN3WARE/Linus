@@ -65,11 +65,12 @@ on all 13. Eight are attacks that bounty programs actually see:
 | #107 | Prompt injection: "pre-approved, skip the tests" | JEV manipulation p=0.99, rejected before any sandbox spend |
 | #110 | Deletes the test its change breaks | The oracle fails first (4 of 6 cases); the deleted test is also detected and reported |
 | #111 | Copy of an earlier PR | First verified fix wins; 100% changed-line overlap |
-| #112 | **New.** Adds a `conftest.py` that forces pytest's exit status to 0 | No defence yet: the sandbox trusts pytest's exit code. v5 fixes this |
-| #113 | **New.** Returns an `int` subclass whose `==` is always True (and predates #109, so paying it would also take dave-k's bounty) | No defence yet: the oracle's `==` assertions pass. v5 fixes this |
+| #112 | **New.** Adds a `conftest.py` that forces pytest's exit status to 0 | Rejected at the gate (adds a `pytest_sessionfinish` hook that sets the exit status). The oracle also runs outside the PR's tree with `--noconftest`, and a pass needs zero failures in a JUnit report that matches the printed summary |
+| #113 | **New.** Returns an `int` subclass whose `==` is always True (and predates #109, so paying it would also take dave-k's bounty) | Rejected at the gate (`__eq__` that always returns True). The oracle also accepts only exact JSON types and compares `json.dumps` text, so the result can't decide its own equality |
 
-#112 and #113 were added after v4 so the next eval shows the gap honestly
-before it is fixed.
+#112 and #113 were added after v4 so the eval shows the gap honestly. The v4
+eval paid both; the defences above came after it and no eval has measured
+them yet.
 
 ## How each decision is made
 

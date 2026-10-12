@@ -204,7 +204,11 @@ def close(
         if not run_id:
             console.print("Nothing to resume.")
             raise typer.Exit(0)
-    summary = _run_close(settings, run_id, crash_after)
+    try:
+        summary = _run_close(settings, run_id, crash_after)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
     raise typer.Exit(0 if summary["status"] == "proposed" else 1)
 
 
@@ -217,8 +221,13 @@ def approve(run_id: str, by: str = typer.Option(None, help="Approver name (defau
     if not run or run["status"] != "proposed":
         console.print(f"[red]Run {run_id} is not awaiting approval[/] (status: {run and run['status']}).")
         raise typer.Exit(1)
-    proposal = settings.state_dir / "runs" / run_id / "ledger.proposed.jsonl"
-    entries = [json.loads(line) for line in proposal.read_text().splitlines() if line.strip()]
+    run_dir = settings.state_dir / "runs" / run_id
+    proposal = run_dir / "ledger.proposed.jsonl"
+    raw = proposal.read_bytes()
+    if problems := ledger.proposal_problems(raw, json.loads(run["summary"]), run_dir / "receipts"):
+        console.print("[red]Refusing: the proposal does not check out:[/] " + "; ".join(problems))
+        raise typer.Exit(1)
+    entries = [json.loads(line) for line in raw.decode().splitlines() if line.strip()]
     path = settings.state_dir / "ledger.jsonl"
     if problems := ledger.verify_chain(path):
         console.print("[red]Ledger is corrupted, refusing to append:[/] " + "; ".join(problems))
@@ -229,7 +238,7 @@ def approve(run_id: str, by: str = typer.Option(None, help="Approver name (defau
         raise typer.Exit(1)
     approval = {"type": "approval", "run_id": run_id, "approved_by": by or getpass.getuser(),
                 "approved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                "proposal_sha256": hashlib.sha256(proposal.read_bytes()).hexdigest()}
+                "proposal_sha256": hashlib.sha256(raw).hexdigest()}
     written = ledger.append(path, entries + [approval])
     store.finish_run(run_id, "approved", json.loads(run["summary"]))
     console.print(f"[green]Approved.[/] {len(written)} entries appended to {path} "
@@ -300,12 +309,10 @@ def runs() -> None:
 def receipt(path: Path) -> None:
     """Re-run a receipt's sandbox proof with no LLM calls and compare the outcomes."""
     import hashlib as _hashlib
-    import shutil as _shutil
-    import tempfile
 
     from linus import sandbox
     from linus.diffcheck import DiffSignals
-    from linus.oracle import Oracle
+    from linus.oracle import Oracle, base_run
     from linus.verify import verify
 
     settings = load_settings()
@@ -339,14 +346,7 @@ def receipt(path: Path) -> None:
             raise typer.Exit(1)
         oracle = Oracle(issue=o["issue"], valid=True, test_code=o["test_code"], test_path=o["test_path"],
                         test_sha256=o["test_sha256"])
-        tree = Path(tempfile.mkdtemp(prefix="receipt-base-", dir=workdir))
-        try:
-            source.export(pr.base_sha, tree)
-            (tree / o["test_path"]).parent.mkdir(parents=True, exist_ok=True)
-            (tree / o["test_path"]).write_text(o["test_code"])
-            base = sandbox.pytest(tree, [o["test_path"]], label="receipt_base")
-        finally:
-            _shutil.rmtree(tree, ignore_errors=True)
+        base = base_run(source, pr.base_sha, o["test_code"], workdir, "receipt_base")
         rows.append(("oracle on base code", "fail", base.outcome, base.outcome == "fail"))
 
     result = verify(source, pr, oracle, DiffSignals(**r["signals"]), workdir)

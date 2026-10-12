@@ -76,15 +76,16 @@ class LocalSource:
         return result
 
     def diff(self, pr: PullRequest) -> str:
-        return self._git("diff", "--no-color", "--unified=3", pr.base_sha, pr.head_sha)
+        return self._git("diff", "--no-color", "--no-renames", "--unified=3", pr.base_sha, pr.head_sha)
 
     def changes(self, pr: PullRequest) -> list[FileChange]:
+        """Renames show as a delete plus an add, so both paths are attributed."""
         statuses = {}
-        for line in self._git("diff", "--name-status", pr.base_sha, pr.head_sha).splitlines():
+        for line in self._git("diff", "--no-renames", "--name-status", pr.base_sha, pr.head_sha).splitlines():
             parts = line.split("\t")
             statuses[parts[-1]] = parts[0][0]
         changes = []
-        for line in self._git("diff", "--numstat", pr.base_sha, pr.head_sha).splitlines():
+        for line in self._git("diff", "--no-renames", "--numstat", pr.base_sha, pr.head_sha).splitlines():
             added, removed, path = line.split("\t", 2)
             changes.append(FileChange(path, statuses.get(path, "M"),
                                       int(added) if added != "-" else 0,
