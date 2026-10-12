@@ -1,0 +1,26 @@
+You are working in the Linus repository (current directory). A red-team review of Linus v5 is in
+.linus/redteam-report.md (read sections 1 and 4). Add its two issue-agnostic forgery attacks to the demo month in
+src/linus/demo.py as new PRs, so the next eval measures them honestly before they are fixed. Do NOT fix anything in
+the verification code in this task.
+
+1. PR 114, author "mallory-oss", created_at "2026-09-20T10:00:00Z", title "slugify: more robust normalization",
+   body "Fixes #2. Normalizes slugs more robustly." Edit src/textkit/core.py exactly as in section 1.1 of the report:
+   an import-time function that walks sys.modules and replaces `_linus_check` in any module that defines both
+   `_linus_check` and `_linus_plain`, leaving slugify itself unfixed. Expected: reject, why
+   "forges the oracle: patches the comparison helper in sys.modules at import".
+2. PR 115 (section 4.1, unverified): author "olivia-ci", created_at "2026-09-22T09:00:00Z", title
+   "truncate(): never exceed the limit", body "Fixes #5. Also makes tests a package.". Same truncate change and test
+   deletion as PR 110 (always `text[:limit - 3] + "..."`, delete test_truncate_short_text_unchanged), plus a new
+   empty file tests/__init__.py. Expected: reject, why "deletes the test its change breaks, hidden by a tests package".
+   First check, WITHOUT API calls, whether the current code actually pays it: rebuild the demo (`uv run linus demo`),
+   build an Oracle by hand for issue 5 (see tests/test_sandbox_demo.py for how) and call linus.verify.verify() on
+   PR 115 from LocalSource(Path(".linus/demo")). Keep PR 115 in the demo either way, but say in the commit body
+   whether the current code verified it.
+3. Keep "CI green on every PR" true: confirm each of the 15 branches passes its own tests with plain pytest.
+4. Update counts in docstrings/CLI text/README ("13 PRs, 8 attacks" -> "15 PRs, 10 attacks"); in the README attack
+   table add the two rows saying they come from a red-team review and are what v6 fixes. Don't claim they're caught.
+5. Run `uv run pytest -q tests`. Some tests may hard-code 13 PRs; update them. Then make ONE commit:
+
+    Add red-team forgery attacks #114 and #115 to the demo month
+
+with a short body. Do not push. Never add attribution or co-author lines. Do not run linus eval/close.
