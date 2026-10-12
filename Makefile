@@ -2,7 +2,10 @@
 
 setup:
 	uv sync
-	docker build -q -t linus-sandbox sandbox/
+	@# Build the sandbox image once; retry, because Docker Hub pulls can be flaky.
+	@docker image inspect linus-sandbox >/dev/null 2>&1 || \
+	  for i in 1 2 3; do docker build -q -t linus-sandbox sandbox/ && break || sleep 5; done
+	@docker image inspect linus-sandbox >/dev/null
 
 test:
 	uv run pytest -q tests
