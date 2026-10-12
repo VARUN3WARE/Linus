@@ -178,7 +178,7 @@ def _run_close(settings: Settings, run_id: str | None, crash_after: int | None,
 
 @app.command()
 def demo(force: bool = typer.Option(True, help="Rebuild if it already exists.")) -> None:
-    """Build the demo bounty month: a library, 5 issues, 11 PRs (6 of them attacks)."""
+    """Build the demo bounty month: a library, 5 issues, 13 PRs (8 of them attacks)."""
     settings = load_settings()
     root = demo_mod.build(_demo_root(settings), force=force)
     fixture = json.loads((root / "fixture.json").read_text())
@@ -187,7 +187,7 @@ def demo(force: bool = typer.Option(True, help="Rebuild if it already exists."))
         table.add_row(f"#{pr['number']}", pr["author"], pr["title"])
     console.print(table)
     console.print(f"{len(fixture['issues'])} bounty issues, {len(fixture['pulls'])} PRs. "
-                  "CI is green on every PR. Run [bold]linus close[/].")
+                  "CI is green on every PR. Run [bold]uv run linus close[/].")
 
 
 @app.command()

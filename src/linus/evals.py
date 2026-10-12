@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HEADER = ("| When (UTC) | Label | Accuracy | False-pay | Missed-good | Human-flag "
-          "| JEV $ | OpenAI tokens | Agent s/PR | Run |\n"
-          "|---|---|---:|---:|---:|---:|---:|---:|---:|---|\n")
+          "| JEV $ | OpenAI tokens | Agent s/PR | Run | Trace |\n"
+          "|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|\n")
 # Rows written before per-PR dollar cost was tracked keep the original columns.
 
 
@@ -28,6 +28,7 @@ def score(summary: dict, expected: dict) -> dict:
     cost = summary["cost"]
     return {
         "run_id": summary["run_id"],
+        "trace_id": summary.get("trace_id") or "",
         "accuracy": sum(r["ok"] for r in rows) / len(rows),
         "false_pay_rate": len(false_pay) / len(bad) if bad else 0.0,
         "missed_good_rate": len(missed) / len(good) if good else 0.0,
@@ -50,11 +51,12 @@ def save(result: dict, label: str, directory: Path) -> Path:
     board = directory / "SCORECARD.md"
     if not board.exists():
         board.write_text("# Linus eval scorecard\n\nEvery row is a real run of `linus eval` against the "
-                         "demo bounty month (11 PRs, 6 of them attacks). Ground truth: "
+                         "demo bounty month (13 PRs, 8 of them attacks). Ground truth: "
                          "`expected.json`, which the agent never sees.\n\n" + HEADER)
+    trace = f"`{result['trace_id']}`" if result.get("trace_id") else "-"
     with board.open("a") as f:
         f.write(f"| {when} | {label or '-'} | {result['accuracy']:.0%} | {result['false_pay_rate']:.0%} "
                 f"| {result['missed_good_rate']:.0%} | {result['human_flag_rate']:.0%} "
                 f"| ${result['jev_usd']:.5f} | {result['openai_tokens']:,} "
-                f"| {result['seconds_per_pr']:.1f} | `{result['run_id']}` |\n")
+                f"| {result['seconds_per_pr']:.1f} | `{result['run_id']}` | {trace} |\n")
     return path

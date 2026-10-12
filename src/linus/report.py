@@ -34,7 +34,7 @@ class ConsoleUI:
 
     def crash(self, run_id: str, processed: int) -> None:
         self.c.print(f"\n[bold red]Simulated crash (kill -9) after {processed} PRs.[/] "
-                     f"State is saved per PR. Resume with: [bold]linus close --resume {run_id}[/]")
+                     f"State is saved per PR. Resume with: [bold]uv run linus close --resume {run_id}[/]")
 
     def done(self, summary: dict) -> None:
         table = Table(title="Proposed payouts" if summary["status"] == "proposed" else "Payouts (halted)")
@@ -75,7 +75,7 @@ class ConsoleUI:
         if summary.get("trace_id"):
             self.c.print(f"  neatlogs trace: {summary['trace_id']}  (neatlogs trace get {summary['trace_id']})")
         if summary["status"] == "proposed":
-            self.c.print(f"  next: review, then [bold]linus approve {summary['run_id']}[/]")
+            self.c.print(f"  next: review, then [bold]uv run linus approve {summary['run_id']}[/]")
 
 
 def markdown(summary: dict) -> str:

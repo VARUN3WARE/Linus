@@ -33,7 +33,7 @@ writes a tamper-evident ledger for the maintainer to approve.
 | Tool | How we use it | Evidence |
 |---|---|---|
 | neatlogs | One trace per close: workflow span, agent span per PR, JEV calls as LLM spans with tokens and cost, auto-captured OpenAI calls, Docker runs as tool spans, anti-gaming and invariant guardrails | Workflow `linus`. Cold v4 run: trace `d471472b34e4ee099f72c18f53fde268`. _Add dashboard screenshots of the v2 (failure) and v4 (fixed) runs._ |
-| Entire | Enabled for the coding agent in this repo (`.entire/`, hooks in `.claude/settings.json`) | `entire checkpoint list`. _The first build session started before Entire was installed, so checkpoints begin with later sessions._ |
+| Entire | Enabled for Claude Code in this repo (`.entire/`, hooks in `.claude/settings.json`) with PII redaction on | `entire checkpoint list`. _The first build session ran with the parent folder as its working directory, so the repo's hooks never loaded and it has no checkpoints. Checkpoints are recorded for coding sessions run inside the repo, from Oct 12._ |
 | cfo.ai | Pricing, cost per verified PR, margins, runway | _Business plan link pending; inputs below_ |
 | JEV | Gates, oracle audit, scoring levels | Every receipt records JEV's answers and model version (`jev-1.13.0`) |
 

@@ -17,7 +17,7 @@ eval:
 	uv run linus eval
 
 # One command for judges: build everything, run the full close on the demo
-# month (11 PRs, 6 attacks) and score it against ground truth.
+# month (13 PRs, 8 attacks) and score it against ground truth.
 judge: setup test
 	uv run linus doctor || true
 	uv run linus demo
