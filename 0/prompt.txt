@@ -1,0 +1,76 @@
+You are working in the Linus repository (current directory). Read .linus/redteam-report.md (an independent red-team
+review of v5; every finding marked confirmed was reproduced twice) and src/linus/*.py, tests/. Fix the confirmed
+problems as v6, add tests for each, run `uv run pytest -q tests`, make ONE commit. Do not push. Do not run
+`linus eval`/`linus close`/`--publish` (the maintainer does, they cost API calls). Never add attribution lines.
+Keep the code style (small functions, docstrings that say why).
+
+The demo month now has 16 PRs (11 attacks); PRs 114 and 116 (patch the oracle's comparison helper via sys.modules;
+116 disguises it inside a partial fix and v5's sandbox verified it) and 115 (deletes the test its change breaks, with
+a tests/__init__.py) must end up rejected by verification itself, and the honest PRs
+101, 103, 106, 108, 109 must still be verified. Check without API calls by hand-building oracles as in
+tests/test_sandbox_demo.py and calling linus.verify.verify(); extend tests/test_sandbox_demo.py with 114, 115 and 116.
+
+## 1. The answers never enter the sandbox (fixes report 1.1, and makes 3.2 moot for the oracle)
+
+Replace the in-container pytest oracle run with a Linus-owned driver:
+- The container receives ONLY the imports and the call expressions (no expected values). A driver script
+  (Linus-owned, mounted read-only, run as `python -I` with the PR's import root appended to sys.path AFTER the
+  driver's own imports, as the suite run does) evaluates each call in its own fresh subprocess
+  (`python -I` per case, with a per-case timeout), and each subprocess prints one JSON line:
+  {"ok": true, "value": <result as JSON>, "plain": <bool: result and everything inside are exact plain JSON types,
+  no subclasses, dict keys str>} or {"ok": false, "error": "<ExceptionType>: <message>", "where": "<file of the
+  deepest frame>"}.
+- The HOST (Linus process, never imports PR code) compares each result with the expected value: pass only if
+  ok and plain and json.dumps(value, sort_keys=True) == json.dumps(expected, sort_keys=True); raises cases pass only
+  if the error type name matches. Missing/garbled lines = failed case. Forging now requires knowing the expected
+  value, which never left the host.
+- Keep the oracle's own text representation (the rendered pytest file) for receipts/readability if useful, but
+  the verdict must come from the host-side comparison. Oracle validation on base uses the same driver: a case
+  reproduces the bug if it fails on base for a real reason (decide by LOCATION first, report 3.5: deepest frame
+  under the PR/base tree's package = reproduction; in the driver/case expression, stdlib or site-packages =
+  authoring error), and `linus receipt` re-verification must still work.
+- Bump oracle FORMAT, record the format on each item's oracle record and on the run (report 3.6); on resume refuse
+  runs judged under an older format with a clear message.
+
+## 2. Import root comes from the base tree (report 1.2)
+
+Choose import roots from the BASE tree (src/ layout or flat) and use the same roots for base and PR runs. Flag for
+a human any PR that adds a new top-level import root or a second copy of an existing top-level package (e.g. adds
+src/ when base had none).
+
+## 3. Base tests run where they live (report 4.1 and 2.1)
+
+Run the base branch's tests from a separate export of the BASE tree's tests placed at their original relative
+paths next to the PR's code (e.g. export the base test files, including non-.py fixtures, binary-safe, into a
+second tree that imports the PR's package), in a separate pytest process, not mixed into the PR's tests directory,
+so a tests/__init__.py in the PR can't shadow them. Then assert the JUnit report contains every base test node id
+(missing ids = tampering/inconclusive, never pass). Keep the PR's own suite run too.
+
+## 4. Fewer false rejections (report 2.3-2.6)
+
+In diffcheck: apply the always-true __eq__ and library sys.exit rules only to non-test code files and ignore
+`if __name__ == "__main__":` blocks; drop the bare `exitcode` rule; match only literal "/linus-out" and
+"/linus-oracle" strings; treat pytest hook *definitions* as harness edits (flag a verified PR for a human), and
+reserve hard reject for concrete manipulation (assigning session/config exitstatus, report.outcome, writing the
+JUnit path, os._exit in library code, module-tampering below). Add a module-tampering rule (report 1.1 fix 2):
+import-time code that iterates sys.modules, assigns into another module's __dict__/globals(), or setattr on a
+module object -> reject as manipulation.
+
+## 5. Robust pytest output (report 3.1, 3.3)
+
+Pass `--verbosity=-1 --color=no -p no:cacheprovider` after the project's addopts; strip ANSI before matching the
+summary; treat "no summary line" as missing evidence and rely on JUnit (with exit code) rather than calling it
+forgery. Treat docker exit codes 125-127 as infrastructure failures only when no JUnit report was written; also
+recognize "Cannot connect to the Docker daemon" / "Is the docker daemon running" with any exit code.
+
+## 6. Infrastructure failures stay resumable (report 3.4)
+
+An InfrastructureError must not mark the PR done: keep it at its prior stage with the error recorded, stop the
+close with the run still "running" and a clear message to fix Docker and `uv run linus close --resume latest`.
+Also refuse to settle (or approve) a second run for a (repo, period) that already has an approved run.
+
+Commit message:
+
+    v6: answers never enter the sandbox; base tests isolated; fewer false rejections
+
+with a body listing the fixes and which red-team findings each closes.

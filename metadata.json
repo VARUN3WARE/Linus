@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4Q31S5Z8A3YSRGEYFFQ81A5",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/linus/cli.py",
+    "src/linus/close.py",
+    "src/linus/diffcheck.py",
+    "src/linus/oracle.py",
+    "src/linus/sandbox.py",
+    "src/linus/store.py",
+    "src/linus/verify.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 60,
+    "cache_creation_tokens": 171854,
+    "cache_read_tokens": 3896972,
+    "output_tokens": 64992,
+    "api_call_count": 32
+  }
+}
