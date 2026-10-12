@@ -165,7 +165,7 @@ def _source(settings: Settings, github: str | None = None, period: str | None = 
 
 
 def _run_close(settings: Settings, source: LocalSource, run_id: str | None, crash_after: int | None,
-               reuse_oracles: bool = True) -> dict:
+               reuse_oracles: bool = True, measurement: bool = False) -> dict:
     problems = settings.problems()
     if problems:
         console.print("[red]Fix .env first:[/] " + "; ".join(problems))
@@ -177,7 +177,7 @@ def _run_close(settings: Settings, source: LocalSource, run_id: str | None, cras
     try:
         close_run = Close(settings, source, load_policy(Path("bounty.yml")),
                           report.ConsoleUI(console), run_id=run_id, crash_after=crash_after,
-                          reuse_oracles=reuse_oracles)
+                          reuse_oracles=reuse_oracles, measurement=measurement)
         summary = close_run.run()
     finally:
         if settings.neatlogs_api_key:
@@ -234,9 +234,9 @@ DEMO_AUTHORS_OPT = typer.Option(False, "--demo-authors", help="With --github: th
 
 
 def _run_source_close(settings: Settings, source: LocalSource, run_id: str | None, crash_after: int | None,
-                      reuse_oracles: bool = True) -> dict:
+                      reuse_oracles: bool = True, measurement: bool = False) -> dict:
     try:
-        return _run_close(settings, source, run_id, crash_after, reuse_oracles)
+        return _run_close(settings, source, run_id, crash_after, reuse_oracles, measurement)
     except Halted as exc:
         console.print(f"[red]Close stopped:[/] {exc}")
         raise typer.Exit(1) from exc
@@ -389,7 +389,7 @@ def eval_cmd(
         summary = json.loads(stored["summary"])
     else:
         source = _source(settings, github, period, demo_authors)
-        summary = _run_source_close(settings, source, None, None, reuse_oracles=False)
+        summary = _run_source_close(settings, source, None, None, reuse_oracles=False, measurement=True)
     expected_path = _demo_root(settings) / "expected.json"
     if not expected_path.exists():
         demo_mod.build(_demo_root(settings), force=True)

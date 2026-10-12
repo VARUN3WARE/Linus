@@ -37,7 +37,8 @@ class ConsoleUI:
                      f"State is saved per PR. Resume with: [bold]uv run linus close --resume {run_id}[/]")
 
     def done(self, summary: dict) -> None:
-        table = Table(title="Proposed payouts" if summary["status"] == "proposed" else "Payouts (halted)")
+        titles = {"proposed": "Proposed payouts", "eval": "Payouts (eval run: measurement only, not approvable)"}
+        table = Table(title=titles.get(summary["status"], "Payouts (halted)"))
         table.add_column("contributor")
         table.add_column("PRs")
         for a in summary["allocations"]:

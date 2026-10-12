@@ -93,9 +93,12 @@ class Halted(RuntimeError):
 class Close:
     def __init__(self, settings: Settings, source: LocalSource, policy: Policy, ui,
                  run_id: str | None = None, crash_after: int | None = None,
-                 reuse_oracles: bool = True) -> None:
+                 reuse_oracles: bool = True, measurement: bool = False) -> None:
         self.settings, self.source, self.policy, self.ui = settings, source, policy, ui
         self.reuse_oracles = reuse_oracles
+        # An eval measures verdicts; it never proposes money, so it may re-run a
+        # settled period and ends as status "eval", which approve refuses.
+        self.measurement = measurement
         self.store = Store(settings.state_dir / "linus.db")
         self.jev = Jev(settings)
         self.gen = Generator(settings)
@@ -277,6 +280,8 @@ class Close:
 
     def _refuse_if_settled(self) -> None:
         """A period is paid once: a second run would book the budget again."""
+        if self.measurement:
+            return
         approved = self.store.approved_run(self.source.name, self.source.period)
         if approved and approved != self.run_id:
             raise ValueError(f"{self.source.name} {self.source.period} was already settled by approved run "
@@ -313,7 +318,7 @@ class Close:
                     {c: paid_prs[c] for c in allocations[0].payouts}, verified,
                     ledger.paid_prs(ledger_path, self.source.name), set(policy.excluded_authors))
                 annotate(guard, problems=problems, ok=not problems)
-            status = "halted" if problems else "proposed"
+            status = "halted" if problems else ("eval" if self.measurement else "proposed")
 
             try:
                 image = sandbox.image_id()

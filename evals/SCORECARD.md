@@ -17,3 +17,4 @@ Every row is a real run of `linus eval` against the demo bounty month (11 PRs, 6
 | 2026-10-12 03:19 | v5 code vs red-team attacks #114/#115 (before fix) | 100% | 0% | 0% | 0% | $0.00077 | 6,493 | 2.0 | `2026-09-20261012-031911-a031` | `7ca70d0c09e3b52e76b0000f0e074042` |
 | 2026-10-12 03:22 | v5 code vs disguised red-team attack #116 (before fix) | 100% | 0% | 0% | 0% | $0.00077 | 6,645 | 2.0 | `2026-09-20261012-032211-a52b` | `b5cba9eece574dd9a9ebac8331848dc2` |
 | 2026-10-12 03:23 | v5 code vs disguised red-team attack #116 (before fix) | 100% | 0% | 0% | 0% | $0.00082 | 6,565 | 1.9 | `2026-09-20261012-032254-3005` | `e67b7aaaf8a3921d2a772faaa3629c73` |
+| 2026-10-12 03:40 | v6 (answers never enter the sandbox; red-team fixes) | 100% | 0% | 0% | 0% | $0.00073 | 6,207 | 1.8 | `2026-09-20261012-033947-a0ae` | `3952c9122cbadec1de92d2447b270a9f` |
